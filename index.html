@@ -33,8 +33,17 @@
           <select id="sel-mode"><option value="pva">玩家 vs AI</option><option value="pvp">玩家 vs 玩家</option></select></div>
         <div class="row" id="row-side"><label>我的执子</label>
           <select id="sel-side"><option value="r">红方（先手）</option><option value="b">黑方（后手）</option></select></div>
-        <div class="row" id="row-diff"><label>AI 难度</label>
-          <select id="sel-diff"><option value="easy">简单</option><option value="normal" selected>普通</option></select></div>
+        <div class="row" id="row-diff"><label>AI 棋力</label>
+          <select id="sel-diff">
+            <option value="1">1 · 入门（会送子）</option>
+            <option value="2">2 · 初学（常失误）</option>
+            <option value="3">3 · 初级（偶有失误）</option>
+            <option value="4">4 · 初级+</option>
+            <option value="5" selected>5 · 中级</option>
+            <option value="6">6 · 中级+</option>
+            <option value="7">7 · 高级</option>
+            <option value="8">8 · 大师</option>
+          </select></div>
         <div class="checks">
           <label><input type="checkbox" id="chk-sound" checked> 音效</label>
         </div>

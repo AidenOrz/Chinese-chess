@@ -13,7 +13,7 @@ export const game = {
   over: false, resultTitle: '', resultDesc: '',
   mode: 'pva',              // 'pva' | 'pvp'
   humanSide: RED,
-  difficulty: 'normal',
+  difficulty: '5',          // AI 棋力档位 1~8（见 engine/levels.js）
   thinking: false,
   checkStreak: { r: 0, b: 0 },   // 连续将军计数（长将判负）
   noCapture: 0                   // 无吃子步数（60回合=120步判和）

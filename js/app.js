@@ -3,7 +3,10 @@
  * 游戏流程控制：正式对局 / 教学模式 / 推演模式
  * ===================================================================== */
 import { sideOf, other, RED, sideName, initialBoard, isInCheck, legalMoves, moveName,
-         detectPhase, strategyPlan, chooseMove } from './engine/index.js';
+         detectPhase, strategyPlan } from './engine/index.js';
+import { chooseMove } from './engine/search.js';
+import { LEVELS, levelById } from './engine/levels.js';
+import { workerSearch, resetWorker } from './engine/client.js';
 import { buildRecommendations, openingSuggestions, positionDiagnostics,
          opponentThreats, bestReplyName, describeAiMove } from './teach/explain.js';
 import { game, analysis, ui, runtime, teachMode } from './state.js';
@@ -15,11 +18,11 @@ import { renderCaptured, renderMoveList, updateAll, toast, showResultModal, rend
 export const aiSide = () => other(game.humanSide);
 export const adviceSide = () => game.mode === 'pva' ? game.humanSide : RED;   // “我方”：人机=玩家方；双人=默认红方
 
-// 难度 → 搜索参数（与重构前行为一致）
+// 难度（1~8 档）→ 搜索参数
 function aiOpts() {
-  return game.difficulty === 'easy'
-    ? { depth: 2, useQ: false, timeMs: 1500, exact: false, randomWindow: 90 }
-    : { depth: 3, useQ: true, timeMs: 4000, exact: false, randomWindow: 20 };
+  const lv = levelById(game.difficulty);
+  return { depth: lv.depth, useQ: lv.useQ, timeMs: lv.timeMs, exact: false,
+           randomWindow: lv.randomWindow, blunderChance: lv.blunderChance };
 }
 
 // 应用一步正式走法（唯一入口，全部经 legalMoves 校验后调用）
@@ -75,19 +78,23 @@ export function applyFormalMove(m) {
   else if (game.mode === 'pva' && game.turn === game.humanSide) runTeachAnalysis();
 }
 
-// AI 回合调度（异步留出 UI 刷新时间）
+// AI 回合调度：搜索在 Worker 线程执行，主线程不冻结
 export function scheduleAi() {
   if (game.over || game.mode !== 'pva' || game.turn === game.humanSide) return;
   game.thinking = true;
   updateAll();
   const epoch = runtime.aiEpoch;   // 捕获世代：期间重开/换边则本次回调作废
-  setTimeout(() => {
-    if (epoch !== runtime.aiEpoch) return;   // 对局已重开，放弃过期回调（否则会在新对局错序落子）
-    const m = chooseMove(game.board, aiSide(), aiOpts());
-    game.thinking = false;
-    if (m && !game.over) applyFormalMove(m);
-    else updateAll();
-  }, 420);
+  const t0 = Date.now();
+  workerSearch(game.board.slice(), aiSide(), aiOpts()).then(m => {
+    if (epoch !== runtime.aiEpoch) return;   // 对局已重开，放弃过期结果
+    const wait = Math.max(0, 420 - (Date.now() - t0));   // 保持至少 420ms 的行棋节奏
+    setTimeout(() => {
+      if (epoch !== runtime.aiEpoch) return;
+      game.thinking = false;
+      if (m && !game.over) applyFormalMove(m);
+      else updateAll();
+    }, wait);
+  });
 }
 
 // 悔棋：人机模式回退到玩家行棋（含玩家最近一步）；双人模式回退双方各一步
@@ -132,6 +139,7 @@ export function startGame() {
   game.over = false; game.resultTitle = ''; game.resultDesc = '';
   game.thinking = false;
   runtime.aiEpoch++;   // 作废可能挂起的旧 AI 回调
+  resetWorker();       // 终止在途的旧搜索
   game.checkStreak = { r: 0, b: 0 };
   game.noCapture = 0;
   ui.selected = -1; ui.targets = []; ui.lastMove = null; runtime.teachCtx = null;

@@ -2,6 +2,7 @@
  * 启动与控件绑定
  * ===================================================================== */
 import { other, legalMoves, isInCheck, RED } from './engine/index.js';
+import { levelById } from './engine/levels.js';
 import { game, analysis, ui, runtime, teachMode } from './state.js';
 import { startGame, undoFormal, enterAnalysis, exitAnalysis, undoAnalysis, resetAnalysis, runTeachAnalysis } from './app.js';
 import { computeLayout, renderHints, clearRecHighlights } from './ui/layout.js';
@@ -33,7 +34,11 @@ $('sel-side').addEventListener('change', e => {
   startGame();
   toast('你执' + (game.humanSide === RED ? '红（先手）' : '黑（后手）') + '，重新开局');
 });
-$('sel-diff').addEventListener('change', e => { game.difficulty = e.target.value; toast('AI 难度已设为「' + (e.target.value === 'easy' ? '简单' : '普通') + '」'); });
+$('sel-diff').addEventListener('change', e => {
+  game.difficulty = e.target.value;
+  const lv = levelById(game.difficulty);
+  toast('AI 棋力已设为「' + lv.id + ' · ' + lv.name + '」' + (lv.desc ? '（' + lv.desc + '）' : ''));
+});
 $('sel-teach').addEventListener('change', () => {
   clearRecHighlights();
   $('teach-recommend').innerHTML = '';
