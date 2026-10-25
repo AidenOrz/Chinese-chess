@@ -3,7 +3,7 @@
  * 交互（点击 + 拖拽，鼠标/触摸统一 Pointer 事件）——引入即绑定
  * ===================================================================== */
 import { idx, inBoard, sideOf, sideName, pseudoMoves, isInCheck, legalMoves } from '../engine/index.js';
-import { game, analysis, ui } from '../state.js';
+import { game, analysis, ui, runtime } from '../state.js';
 import { explainIllegal } from '../teach/explain.js';
 import { toast } from './panels.js';
 import { snd } from '../audio.js';
@@ -21,6 +21,7 @@ function squareFromEvent(e) {
 }
 function moverSide() { return analysis.active ? analysis.turn : game.turn; }
 function canControl(side) {
+  if (runtime.review && runtime.review.active) return false;   // 复盘只读
   if (analysis.active) return side === analysis.turn;
   if (game.over || game.thinking) return false;
   if (game.mode === 'pvp') return side === game.turn;
@@ -60,6 +61,7 @@ function doMove(from, to) {
 // 处理一次“落点点击”（选择 / 走子 / 非法解释）
 function handleSquareTap(i) {
   if (ui.animating) return;
+  if (runtime.review && runtime.review.active) { toast('复盘模式中，棋盘只读，请先退出复盘'); return; }
   if (analysis.active && analysis.over) { toast('推演局面已结束，请先撤销/重置/退出'); return; }
   const bd = game.board;
   const side = moverSide();

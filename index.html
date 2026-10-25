@@ -52,6 +52,7 @@
         <div class="btns">
           <button id="btn-new">重新开始</button>
           <button id="btn-undo">悔棋</button>
+          <button id="btn-review-live">复盘</button>
           <button id="btn-analysis" class="go">推演模式</button>
         </div>
       </section>
@@ -79,6 +80,18 @@
         <h2>对局存档</h2>
         <div id="archive-list" class="panel-body"><span class="tag-line">暂无存档</span></div>
       </section>
+      <section class="card hidden" id="card-review">
+        <h2>复盘 <span class="tag" id="rev-progress">分析中…</span></h2>
+        <div class="btns">
+          <button id="btn-rv-first">|&lt;</button>
+          <button id="btn-rv-prev">&lt; 上一步</button>
+          <span id="rev-pos" style="align-self:center;min-width:72px;text-align:center;font-size:13px"></span>
+          <button id="btn-rv-next">下一步 &gt;</button>
+          <button id="btn-rv-last">&gt;|</button>
+          <button id="btn-rv-exit" class="warn">退出复盘</button>
+        </div>
+        <div id="rev-list" class="panel-body" style="max-height:260px;overflow-y:auto"></div>
+      </section>
       <section class="card hidden" id="card-analysis">
         <h2>推演分析 <span class="tag">非正式对局</span></h2>
         <div class="panel-body" id="analysis-tip">推演模式下可移动任意一方的棋子试走，不影响正式棋局。非法走法会被拒绝。</div>
@@ -103,6 +116,7 @@
   <h2 id="modal-title"></h2><p id="modal-desc"></p>
   <div class="btns" style="justify-content:center">
     <button id="btn-again" class="go">再来一局</button>
+    <button id="btn-review" class="go">复盘本局</button>
     <button id="btn-close">查看棋盘</button>
   </div>
 </div></div>

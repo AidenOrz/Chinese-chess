@@ -96,6 +96,9 @@ main { display: flex; gap: 16px; align-items: flex-start; }
 .row input[type="text"] { flex: 1 1 120px; min-width: 0; background: #2b3844; color: #eef4f8; border: 1px solid #4a5a68; border-radius: 6px; padding: 5px 8px; font-size: 12px; }
 .arch-item { background: rgba(255,255,255,.05); border-radius: 6px; padding: 6px 8px; margin: 6px 0; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
 .arch-item button { padding: 2px 8px; font-size: 12px; }
+.rev-item { display: inline-block; background: rgba(255,255,255,.05); border-radius: 5px; padding: 3px 7px; margin: 3px 3px; font-size: 13px; cursor: pointer; }
+.rev-item.rev-cur { background: rgba(255,213,79,.22); outline: 1px solid rgba(255,213,79,.6); }
+.rev-item .tag-line { margin-left: 5px; }
 .checks { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0; font-size: 13px; color: #cfe0ea; }
 .checks label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
 .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

@@ -168,11 +168,22 @@ function gameRecord(id) {
   };
 }
 function autosave() { store.saveGame(gameRecord('current')).catch(() => {}); }
-// 终局归档：移入存档列表并清除“进行中”标记
+// 终局归档：移入存档列表并清除“进行中”标记，累计胜负统计
 export function archiveFinishedGame() {
   const id = 'game-' + Date.now();
   store.saveGame({ ...gameRecord(id), over: true, result: game.resultTitle })
     .then(() => store.deleteGame('current'))
+    .then(() => {
+      const t = game.resultTitle;
+      return store.getProgress('stats', null).then(s => {
+        const st = s || { games: 0, red: 0, black: 0, draw: 0, blunders: 0, reviewedPlies: 0 };
+        st.games++;
+        if (t.includes('红方')) st.red++;
+        else if (t.includes('黑方')) st.black++;
+        else st.draw++;
+        return store.setProgress('stats', st);
+      });
+    })
     .catch(() => {});
 }
 // 把存档重放到 game 状态（resume 与载入存档共用）

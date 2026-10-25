@@ -39,7 +39,9 @@ function updateStatus() {
   dot.className = sideNow;
   badge.style.display = analysis.active ? 'inline-block' : 'none';
   let t;
-  if (analysis.active) {
+  if (runtime.review && runtime.review.active) {
+    t = '复盘 · 第 ' + runtime.review.ply + ' / ' + (runtime.review.boards.length - 1) + ' 手';
+  } else if (analysis.active) {
     t = sideName(analysis.turn) + '行棋（推演）';
     if (analysis.over) t = '推演局面已结束';
   } else if (game.over) {
@@ -61,9 +63,11 @@ function updateStatus() {
   sub.textContent = subs.join('　');
 }
 function updateButtons() {
-  $('btn-undo').disabled = analysis.active || game.thinking || game.moveHistory.length === 0 ||
+  const inReview = !!(runtime.review && runtime.review.active);
+  $('btn-undo').disabled = inReview || analysis.active || game.thinking || game.moveHistory.length === 0 ||
     (game.mode === 'pva' && !game.moveHistory.some(r => sideOf(r.piece) === game.humanSide));
-  $('btn-analysis').disabled = game.thinking || analysis.active;
+  $('btn-analysis').disabled = inReview || game.thinking || analysis.active;
+  $('btn-review-live').disabled = inReview || analysis.active || game.thinking || game.moveHistory.length === 0;
   $('btn-a-undo').disabled = !analysis.moves.length;
 }
 function showResultModal() {

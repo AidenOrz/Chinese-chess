@@ -10,6 +10,7 @@ import { store } from './store.js';
 import { computeLayout, renderHints, clearRecHighlights } from './ui/layout.js';
 import { renderCaptured, renderMoveList, updateAll, toast, renderTeachPanel } from './ui/panels.js';
 import { snd, isSoundOn, setSoundOn } from './audio.js';
+import { enterReview } from './ui/review.js';
 import { $ } from './ui/dom.js';
 import './ui/interact.js';
 
@@ -84,8 +85,13 @@ $('btn-fen-out').addEventListener('click', () => {
 // ---- 对局存档 ----
 async function renderArchive() {
   const box = $('archive-list');
-  const games = await store.listGames();
+  const [games, stats] = await Promise.all([store.listGames(), store.getProgress('stats', null)]);
   const rows = [];
+  if (stats && stats.games) {
+    rows.push('<div class="tag-line" style="margin-bottom:6px">累计 ' + stats.games + ' 局 · 红 ' + (stats.red || 0) +
+      ' 胜 / 黑 ' + (stats.black || 0) + ' 胜 / 和 ' + (stats.draw || 0) +
+      (stats.blunders ? ' · 复盘失误 ' + stats.blunders + ' 手' : '') + '</div>');
+  }
   if (game.moveHistory.length && !game.over) {
     rows.push('<div class="arch-item"><b>当前对局</b> · 进行中 ' + game.moveHistory.length + ' 步</div>');
   }
@@ -118,6 +124,8 @@ async function renderArchive() {
   }));
 }
 $('btn-again').addEventListener('click', () => { $('modal').classList.add('hidden'); startGame(); });
+$('btn-review').addEventListener('click', () => { $('modal').classList.add('hidden'); enterReview(); });
+$('btn-review-live').addEventListener('click', enterReview);
 $('btn-close').addEventListener('click', () => $('modal').classList.add('hidden'));
 let resizeTimer = null;
 window.addEventListener('resize', () => {
