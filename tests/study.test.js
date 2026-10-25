@@ -16,7 +16,7 @@ const ok = (c, m) => { if (c) console.log('  ok - ' + m); else { fails++; consol
 
 console.log('=== 学习模式入口测试 ===');
 const { enterStudyCourse, enterStudyPuzzle, exitStudy, tryStudyMove } = await import('../js/ui/study.js');
-const { runtime, game } = await import('../js/state.js');
+const { runtime, game, ui } = await import('../js/state.js');
 
 // ---- 课程进入（曾在此抛 ReferenceError: analysis is not defined）----
 {
@@ -30,9 +30,11 @@ const { runtime, game } = await import('../js/state.js');
 
 // ---- 习题进入 + 一步杀解题 ----
 {
+  ui.lastMove = { from: 1, to: 2 }; ui.selected = 3;   // 模拟上一阶段（跟练）残留的视觉状态
   await enterStudyPuzzle('m1-001');
   ok(runtime.study && runtime.study.kind === 'puzzle' && runtime.study.phase === 'quiz', '习题进入 quiz 阶段');
   ok(game.board[51] === 'C', '习题局面按 FEN 载入（51 位红炮）');
+  ok(!ui.lastMove && ui.selected === -1, '习题开始清空上一手高亮/选中（棋盘视觉复位）');
   tryStudyMove(51, 49);   // 正解：炮三平五，重炮杀
   ok(runtime.study.phase === 'quiz-done', '一步杀解答成功进入 quiz-done');
   await exitStudy();

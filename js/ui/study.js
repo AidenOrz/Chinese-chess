@@ -105,6 +105,8 @@ export function exitStudy() {
 }
 
 /* ---------------- 课程 ---------------- */
+// 演示/应手节奏：留给初学者看清每一步 + 读记谱的时间
+const DEMO_FIRST_MS = 1500, DEMO_STEP_MS = 1700, GUIDED_REPLY_MS = 1000;
 export async function enterStudyCourse(courseId) {
   const { courses } = await loadData();
   const course = courses.find(c => c.id === courseId);
@@ -136,7 +138,7 @@ function applyCourseStep(i) {
     st.demoIdx = 0;
     setBoardFromFen(step.fen);
     courseButtons(false, true);
-    later(playDemoStep, 700);
+    later(playDemoStep, DEMO_FIRST_MS);
   } else if (step.type === 'guided') {
     st.phase = 'guided';
     st.seq = step.moves.slice();
@@ -186,7 +188,7 @@ function playDemoStep() {
   }
   const [f, t] = st.demoMoves[st.demoIdx++];
   applyStudyMove({ from: f, to: t });
-  later(playDemoStep, 850);
+  later(playDemoStep, DEMO_STEP_MS);
 }
 function onGuidedMove(m) {
   const st = runtime.study;
@@ -213,7 +215,7 @@ function onGuidedMove(m) {
       } else {
         studyAppend('继续，轮到你走');
       }
-    }, 650);
+    }, GUIDED_REPLY_MS);
   } else {
     snd.illegal();
     toast('这一步不对，再想想');
@@ -243,9 +245,12 @@ function startQuiz(p) {
   st.wrong = 0;
   st.done = false;
   clearStudyMarks();
+  // 换了逻辑棋盘必须同步复位视觉：上一阶段（跟练等）的棋子位置与高亮不能残留
+  ui.lastMove = null; ui.selected = -1; ui.targets = [];
   studyText('<b>' + (p.title || p.id) + '</b> · ' + (GOAL_TEXT[p.category] || '解题') +
     '（难度 ' + '★'.repeat(p.difficulty || 1) + '）<br>轮到' + sideName(p.side) + '行棋，点击棋子开始。');
   quizButtons();
+  renderAllPieces(); renderHints(); updateAll();
 }
 function quizButtons() {
   const st = runtime.study;

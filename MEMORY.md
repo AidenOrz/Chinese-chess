@@ -21,6 +21,7 @@
 - **跑测试**:`node --test tests/*.test.js`(必须通配符;`node --test tests/` 在 Windows 会把目录当模块名报错)
 - **跨模块可变状态**一律挂 `state.js` 的 `runtime` 对象(ESM 导入绑定只读,不能重赋值——曾因此重构)
 - **模式互斥**:formal / analysis / review / study 四模式,进入新模式前退出旧的(各自 `exitXxx()`)
+- **改 `game.board` 的路径必须紧跟视觉复位**:`renderAllPieces()` + 清 `ui.lastMove/selected/targets`。曾漏在 `startQuiz`(课程跟练→习题时棋盘停在旧局面、点子无反应);`setBoardFromFen` 是现成范本
 - **提交**:中文 message,阶段/主题前缀(如 `阶段2:FEN …`);一个可验证完整单元一个提交
 - **发布**:SW(v3 起)统一网络优先+缓存回退,在线永远最新,离线兜底可用;发布时仍建议递增 `sw.js` 的 `CACHE` 清理历史缓存(两次事故都出在"缓存优先+版本号纪律"上,详见坑 6/9)
 
