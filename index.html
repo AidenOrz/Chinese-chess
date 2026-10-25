@@ -13,16 +13,22 @@
 <div id="app">
   <header>
     <h1>中国象棋</h1>
+    <nav id="topnav">
+      <a href="#/" data-nav="play">对局</a>
+      <a href="#/courses" data-nav="courses">课程</a>
+      <a href="#/puzzles" data-nav="puzzles">题库</a>
+    </nav>
     <div id="status"><span id="turn-dot" class="r"></span><span id="status-text">红方行棋</span><span id="mode-badge">推演模式</span></div>
   </header>
   <div id="sub-status"></div>
-  <main>
+  <main id="page-play">
     <div id="board-col">
       <div id="board-wrap"><div id="board">
         <div id="layer-lines"></div>
         <div id="layer-marks"></div>
         <div id="layer-nums"></div>
         <div id="layer-last"></div>
+        <svg id="layer-arrows"></svg>
         <div id="layer-hints"></div>
         <div id="layer-pieces"></div>
       </div></div>
@@ -48,6 +54,7 @@
           </select></div>
         <div class="checks">
           <label><input type="checkbox" id="chk-sound" checked> 音效</label>
+          <label><input type="checkbox" id="chk-formal"> 正式规则</label>
         </div>
         <div class="btns">
           <button id="btn-new">重新开始</button>
@@ -80,6 +87,11 @@
         <h2>对局存档</h2>
         <div id="archive-list" class="panel-body"><span class="tag-line">暂无存档</span></div>
       </section>
+      <section class="card hidden" id="card-study">
+        <h2 id="study-title">学习模式</h2>
+        <div id="study-body" class="panel-body"></div>
+        <div class="btns" id="study-btns"></div>
+      </section>
       <section class="card hidden" id="card-review">
         <h2>复盘 <span class="tag" id="rev-progress">分析中…</span></h2>
         <div class="btns">
@@ -109,6 +121,20 @@
         <div id="analysis-info" class="panel-body"></div>
       </section>
     </aside>
+  </main>
+  <main id="page-courses" class="hidden">
+    <section class="card" style="flex:1">
+      <h2>课程</h2>
+      <div class="tag-line">从基本杀法到开局原理，每课讲解 → 演示 → 跟练 → 习题</div>
+      <div id="course-list" class="panel-body"><span class="tag-line">正在加载课程…</span></div>
+    </section>
+  </main>
+  <main id="page-puzzles" class="hidden">
+    <section class="card" style="flex:1">
+      <h2>题库</h2>
+      <div class="tag-line">一步杀 / 两步杀 / 残局 / 战术，做错自动进错题本</div>
+      <div id="puzzle-list" class="panel-body"><span class="tag-line">正在加载题库…</span></div>
+    </section>
   </main>
 </div>
 <div id="toast"></div>

@@ -2,8 +2,8 @@
 /* =====================================================================
  * 游戏流程控制：正式对局 / 教学模式 / 推演模式
  * ===================================================================== */
-import { sideOf, other, RED, sideName, initialBoard, isInCheck, legalMoves, moveName,
-         detectPhase, strategyPlan, colOf, rowOf } from './engine/index.js';
+import { sideOf, other, RED, BLACK, sideName, initialBoard, isInCheck, legalMoves, moveName,
+         detectPhase, strategyPlan, colOf, rowOf, hashOf } from './engine/index.js';
 import { chooseMove } from './engine/search.js';
 import { LEVELS, levelById } from './engine/levels.js';
 import { workerSearch, resetWorker } from './engine/client.js';
@@ -14,7 +14,7 @@ import { store } from './store.js';
 import { game, analysis, ui, runtime, teachMode } from './state.js';
 import { snd } from './audio.js';
 import { $ } from './ui/dom.js';
-import { renderAllPieces, renderHints, clearRecHighlights, visualApplyMove, flashMove } from './ui/layout.js';
+import { renderAllPieces, renderHints, clearRecHighlights, visualApplyMove, flashMove, setFlipped } from './ui/layout.js';
 import { renderCaptured, renderMoveList, updateAll, toast, showResultModal, renderTeachPanel } from './ui/panels.js';
 
 export const aiSide = () => other(game.humanSide);
@@ -26,6 +26,18 @@ function aiOpts() {
   return { depth: lv.depth, useQ: lv.useQ, timeMs: lv.timeMs, exact: false,
            randomWindow: lv.randomWindow, blunderChance: lv.blunderChance };
 }
+
+// 正式规则模式：记录局面出现次数（返回该局面第几次出现）
+function bumpPos(board, turn, rec) {
+  if (!game.posCounts) game.posCounts = new Map();
+  const hk = hashOf(board, turn);
+  const key = hk.key + ':' + hk.lock;
+  game.posCounts.set(key, (game.posCounts.get(key) || 0) + 1);
+  if (rec) rec.posKey = key;
+  return game.posCounts.get(key);
+}
+// 人机模式下执黑翻转棋盘
+function syncFlipped() { setFlipped(game.mode === 'pva' && game.humanSide === BLACK); }
 
 // 应用一步正式走法（唯一入口，全部经 legalMoves 校验后调用）
 export function applyFormalMove(m) {
@@ -53,10 +65,20 @@ export function applyFormalMove(m) {
   renderMoveList();
   // 终局判定
   const oppHasMoves = legalMoves(game.board, oppSide).length > 0;
+  let repCount = 0;
+  if (game.formalRules) repCount = bumpPos(game.board, game.turn, rec);
   if (!oppHasMoves) {
     game.over = true;
     game.resultTitle = sideName(mover) + '获胜';
     game.resultDesc = sideName(oppSide) + (gaveCheck ? '被将死' : '被困毙（无子可动）');
+  } else if (game.formalRules && repCount >= 3) {
+    game.over = true;
+    game.resultTitle = '和棋';
+    game.resultDesc = '同一局面第三次出现，判和';
+  } else if (game.formalRules && game.checkStreak[mover] >= 6) {
+    game.over = true;
+    game.resultTitle = sideName(oppSide) + '获胜';
+    game.resultDesc = sideName(mover) + '长将（连续 6 次将军），判负';
   } else if (game.noCapture >= 120) {
     game.over = true;
     game.resultTitle = '和棋';
@@ -126,6 +148,10 @@ export function undoFormal() {
     game.checkStreak.r = rec.prevStreakR;
     game.checkStreak.b = rec.prevStreakB;
     game.turn = sideOf(rec.piece);
+    if (rec.posKey && game.posCounts) {
+      const n = game.posCounts.get(rec.posKey);
+      if (n <= 1) game.posCounts.delete(rec.posKey); else game.posCounts.set(rec.posKey, n - 1);
+    }
     ui.lastMove = h.length ? { from: h[h.length - 1].from, to: h[h.length - 1].to } : null;
   }
   snd.undo();
@@ -148,6 +174,9 @@ export function startGame() {
   resetWorker();       // 终止在途的旧搜索
   game.checkStreak = { r: 0, b: 0 };
   game.noCapture = 0;
+  game.posCounts = new Map();
+  if (game.formalRules) bumpPos(game.board, game.turn, null);
+  syncFlipped();
   ui.selected = -1; ui.targets = []; ui.lastMove = null; runtime.teachCtx = null;
   $('modal').classList.add('hidden');
   $('teach-feedback').innerHTML = ''; $('teach-ai').innerHTML = ''; $('teach-recommend').innerHTML = '';
@@ -161,30 +190,39 @@ export function startGame() {
  * ===================================================================== */
 function gameRecord(id) {
   return {
-    id, mode: game.mode, humanSide: game.humanSide, difficulty: game.difficulty,
+    id, mode: game.mode, humanSide: game.humanSide, difficulty: game.difficulty, formalRules: game.formalRules,
     turn: game.turn, over: game.over, resultTitle: game.resultTitle,
     moves: game.moveHistory.map(r => ({ from: r.from, to: r.to, piece: r.piece, captured: r.captured, name: r.name })),
     savedAt: Date.now()
   };
 }
 function autosave() { store.saveGame(gameRecord('current')).catch(() => {}); }
-// 终局归档：移入存档列表并清除“进行中”标记，累计胜负统计
-export function archiveFinishedGame() {
+// 终局归档：移入存档列表并清除“进行中”标记，累计胜负统计与人机 Elo
+export async function archiveFinishedGame() {
   const id = 'game-' + Date.now();
-  store.saveGame({ ...gameRecord(id), over: true, result: game.resultTitle })
-    .then(() => store.deleteGame('current'))
-    .then(() => {
-      const t = game.resultTitle;
-      return store.getProgress('stats', null).then(s => {
-        const st = s || { games: 0, red: 0, black: 0, draw: 0, blunders: 0, reviewedPlies: 0 };
-        st.games++;
-        if (t.includes('红方')) st.red++;
-        else if (t.includes('黑方')) st.black++;
-        else st.draw++;
-        return store.setProgress('stats', st);
-      });
-    })
-    .catch(() => {});
+  try {
+    await store.saveGame({ ...gameRecord(id), over: true, result: game.resultTitle });
+    await store.deleteGame('current');
+    const t = game.resultTitle;
+    const s = (await store.getProgress('stats', null)) || { games: 0, red: 0, black: 0, draw: 0, blunders: 0, reviewedPlies: 0 };
+    s.games++;
+    if (t.includes('红方')) s.red++;
+    else if (t.includes('黑方')) s.black++;
+    else s.draw++;
+    await store.setProgress('stats', s);
+    // 人机对局 Elo：AI 档位映射参考分（L1≈520 … L8≈2410），K=32
+    if (game.mode === 'pva' && t) {
+      const lv = levelById(game.difficulty);
+      const aiRating = 250 + lv.id * 270;
+      const elo = (await store.getProgress('elo', null)) || { rating: 1200 };
+      const expected = 1 / (1 + Math.pow(10, (aiRating - elo.rating) / 400));
+      const humanWon = t.startsWith(sideName(game.humanSide));
+      const sc = t === '和棋' ? 0.5 : (humanWon ? 1 : 0);
+      elo.rating = Math.max(100, Math.round(elo.rating + 32 * (sc - expected)));
+      elo.games = (elo.games || 0) + 1;
+      await store.setProgress('elo', elo);
+    }
+  } catch (e) { /* 存档失败不影响对局 */ }
 }
 // 把存档重放到 game 状态（resume 与载入存档共用）
 function replayIntoGame(rec, { asFinished }) {
@@ -205,8 +243,15 @@ function replayIntoGame(rec, { asFinished }) {
   game.mode = rec.mode || 'pva';
   game.humanSide = rec.humanSide || RED;
   game.difficulty = rec.difficulty || '5';
+  game.formalRules = !!rec.formalRules;
   game.noCapture = noCap;
   game.checkStreak = streak;
+  game.posCounts = new Map();
+  if (game.formalRules) {
+    bumpPos(initialBoard(), RED, null);
+    const b2 = initialBoard();
+    for (const h of hist) { b2[h.to] = h.piece; b2[h.from] = null; bumpPos(b2, sideOf(h.piece) === RED ? BLACK : RED, h); }
+  }
   if (asFinished) {
     game.over = true;
     game.resultTitle = rec.result || rec.resultTitle || '已结束';
@@ -218,6 +263,7 @@ function replayIntoGame(rec, { asFinished }) {
   }
   runtime.aiEpoch++;
   runtime.teachCtx = null;
+  syncFlipped();
   ui.selected = -1; ui.targets = [];
   ui.lastMove = rec.moves.length ? { from: rec.moves[rec.moves.length - 1].from, to: rec.moves[rec.moves.length - 1].to } : null;
 }

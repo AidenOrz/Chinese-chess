@@ -11,8 +11,20 @@ import { computeLayout, renderHints, clearRecHighlights } from './ui/layout.js';
 import { renderCaptured, renderMoveList, updateAll, toast, renderTeachPanel } from './ui/panels.js';
 import { snd, isSoundOn, setSoundOn } from './audio.js';
 import { enterReview } from './ui/review.js';
+import { enterStudyCourse, exitStudy } from './ui/study.js';
+import { renderCourseList, renderPuzzleList } from './ui/lists.js';
+import { initRouter, showPage } from './ui/router.js';
 import { $ } from './ui/dom.js';
 import './ui/interact.js';
+
+// ---- 路由 ----
+initRouter(async hash => {
+  const h = hash.replace(/\/+$/, '') || '#';
+  if (h === '#/courses') { showPage('courses'); renderCourseList(); }
+  else if (h.startsWith('#/courses/')) { showPage('play'); enterStudyCourse(h.slice('#/courses/'.length)); }
+  else if (h === '#/puzzles') { showPage('puzzles'); renderPuzzleList(); }
+  else showPage('play');
+});
 
 $('sel-mode').addEventListener('change', e => {
   game.mode = e.target.value;
@@ -53,6 +65,11 @@ $('chk-sound').addEventListener('change', e => {
   if (isSoundOn()) snd.move();
   toast(isSoundOn() ? '音效已开启' : '音效已关闭');
 });
+$('chk-formal').addEventListener('change', e => {
+  game.formalRules = e.target.checked;
+  if (game.formalRules && !game.posCounts) game.posCounts = new Map();   // 中途开启则从当前局面起计数
+  toast(game.formalRules ? '已开启正式规则：三次重复判和、长将判负' : '已关闭正式规则（教学宽容模式）');
+});
 $('chk-detail').addEventListener('change', () => { if (runtime.teachCtx) renderTeachPanel(); });
 $('btn-new').addEventListener('click', () => { if (analysis.active) return toast('请先退出推演模式'); startGame(); toast('新对局开始，红方先行'); });
 $('btn-undo').addEventListener('click', undoFormal);
@@ -85,11 +102,12 @@ $('btn-fen-out').addEventListener('click', () => {
 // ---- 对局存档 ----
 async function renderArchive() {
   const box = $('archive-list');
-  const [games, stats] = await Promise.all([store.listGames(), store.getProgress('stats', null)]);
+  const [games, stats, elo] = await Promise.all([store.listGames(), store.getProgress('stats', null), store.getProgress('elo', null)]);
   const rows = [];
   if (stats && stats.games) {
     rows.push('<div class="tag-line" style="margin-bottom:6px">累计 ' + stats.games + ' 局 · 红 ' + (stats.red || 0) +
       ' 胜 / 黑 ' + (stats.black || 0) + ' 胜 / 和 ' + (stats.draw || 0) +
+      (elo && elo.rating ? ' · Elo ' + elo.rating : '') +
       (stats.blunders ? ' · 复盘失误 ' + stats.blunders + ' 手' : '') + '</div>');
   }
   if (game.moveHistory.length && !game.over) {

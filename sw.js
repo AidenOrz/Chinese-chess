@@ -1,7 +1,8 @@
 // Service Worker：导航请求（HTML）网络优先保证更新及时，静态资源缓存优先离线可用
 // 发布新版本时递增 CACHE 版本号
 const CACHE = 'xq-v2';
-const PRECACHE = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
+const PRECACHE = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png',
+                  './data/courses/courses.json', './data/puzzles/puzzles.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(

@@ -39,7 +39,11 @@ function updateStatus() {
   dot.className = sideNow;
   badge.style.display = analysis.active ? 'inline-block' : 'none';
   let t;
-  if (runtime.review && runtime.review.active) {
+  if (runtime.study && runtime.study.kind) {
+    const st = runtime.study;
+    t = (st.kind === 'course' ? '课程 · ' + st.course.title + '（' + (st.stepIdx + 1) + '/' + st.course.steps.length + '）'
+                              : '习题 · ' + (st.puzzle ? (st.puzzle.title || st.puzzle.id) : ''));
+  } else if (runtime.review && runtime.review.active) {
     t = '复盘 · 第 ' + runtime.review.ply + ' / ' + (runtime.review.boards.length - 1) + ' 手';
   } else if (analysis.active) {
     t = sideName(analysis.turn) + '行棋（推演）';
@@ -64,10 +68,12 @@ function updateStatus() {
 }
 function updateButtons() {
   const inReview = !!(runtime.review && runtime.review.active);
-  $('btn-undo').disabled = inReview || analysis.active || game.thinking || game.moveHistory.length === 0 ||
+  const inStudy = !!(runtime.study && runtime.study.kind);
+  $('btn-undo').disabled = inStudy || inReview || analysis.active || game.thinking || game.moveHistory.length === 0 ||
     (game.mode === 'pva' && !game.moveHistory.some(r => sideOf(r.piece) === game.humanSide));
-  $('btn-analysis').disabled = inReview || game.thinking || analysis.active;
-  $('btn-review-live').disabled = inReview || analysis.active || game.thinking || game.moveHistory.length === 0;
+  $('btn-analysis').disabled = inStudy || inReview || game.thinking || analysis.active;
+  $('btn-review-live').disabled = inStudy || inReview || analysis.active || game.thinking || game.moveHistory.length === 0;
+  $('btn-new').disabled = inStudy || game.thinking || analysis.active;
   $('btn-a-undo').disabled = !analysis.moves.length;
 }
 function showResultModal() {

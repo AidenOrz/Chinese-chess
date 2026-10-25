@@ -7,7 +7,7 @@ const ok = (c, msg) => { if (!c) { fails++; console.error('  FAIL:', msg); } els
 
 const { idx, initialBoard, legalMoves, chooseMove, RED, BLACK } = await import('../js/engine/index.js');
 const { game, analysis, runtime } = await import('../js/state.js');
-const { applyFormalMove, scheduleAi, startGame, applyAnalysisMove, undoAnalysis, resumeCurrentGame } = await import('../js/app.js');
+const { applyFormalMove, scheduleAi, startGame, undoFormal, applyAnalysisMove, undoAnalysis, resumeCurrentGame } = await import('../js/app.js');
 
 // ---- 长将仅提示不判负 ----
 {
@@ -45,6 +45,25 @@ const { applyFormalMove, scheduleAi, startGame, applyAnalysisMove, undoAnalysis,
   undoAnalysis();
   ok(game.board[idx(7, 1)] === 'C' && game.board[idx(7, 4)] === null && analysis.moves.length === 0, '撤销推演还原棋盘');
   analysis.active = false;
+}
+
+// ---- 正式规则：三次重复局面判和 ----
+{
+  game.mode = 'pvp'; game.humanSide = RED;
+  game.formalRules = true;
+  startGame();   // 初始局面计一次
+  const seq = [
+    [idx(9, 0), idx(8, 0)], [idx(0, 4), idx(1, 4)],
+    [idx(8, 0), idx(9, 0)], [idx(1, 4), idx(0, 4)]
+  ];
+  for (let round = 0; round < 2; round++) {
+    for (const [f, t] of seq) applyFormalMove({ from: f, to: t });
+  }
+  ok(game.over && game.resultTitle === '和棋' && game.resultDesc.includes('第三次出现'),
+    '第三次重复局面自动判和（over=' + game.over + ' title=' + game.resultTitle + '）');
+  undoFormal();
+  ok(!game.over, '悔棋撤销判和状态');
+  game.formalRules = false; game.posCounts = null;
 }
 
 // ---- AI 自对弈与性能 ----

@@ -17,6 +17,10 @@ header h1 { font-size: 22px; letter-spacing: 4px; color: #f4e3c1; font-weight: 7
 #turn-dot.b { background: #2b2b2b; border-color: #777; }
 #mode-badge { font-size: 12px; background: #e67e22; color: #fff; padding: 2px 8px; border-radius: 10px; display: none; }
 #sub-status { font-size: 12px; color: #f0c674; min-height: 16px; }
+#topnav { display: flex; gap: 4px; margin-right: auto; }
+#topnav a { color: #b8c6d0; text-decoration: none; font-size: 14px; padding: 4px 12px; border-radius: 6px; }
+#topnav a:hover { background: rgba(255,255,255,.08); }
+#topnav a.nav-cur { background: rgba(255,213,79,.15); color: #ffd97a; font-weight: 700; }
 
 main { display: flex; gap: 16px; align-items: flex-start; }
 #board-col { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; }
@@ -99,6 +103,14 @@ main { display: flex; gap: 16px; align-items: flex-start; }
 .rev-item { display: inline-block; background: rgba(255,255,255,.05); border-radius: 5px; padding: 3px 7px; margin: 3px 3px; font-size: 13px; cursor: pointer; }
 .rev-item.rev-cur { background: rgba(255,213,79,.22); outline: 1px solid rgba(255,213,79,.6); }
 .rev-item .tag-line { margin-left: 5px; }
+/* ============ 学习模式 / 课程题库列表 ============ */
+.lesson-item { background: rgba(255,255,255,.05); border-radius: 8px; padding: 10px 12px; margin: 8px 0; cursor: pointer; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lesson-item:hover { background: rgba(255,255,255,.09); }
+.lesson-item .lv { font-size: 11px; border-radius: 8px; padding: 1px 8px; background: #46617a; color: #fff; }
+.lesson-item .prog { font-size: 12px; color: #7be3a6; margin-left: auto; }
+.lesson-cat { color: #f4e3c1; font-size: 14px; margin: 14px 0 4px; letter-spacing: 1px; }
+.pz-done { color: #7be3a6; } .pz-wrong { color: #ff9a8a; }
+#layer-arrows { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .checks { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0; font-size: 13px; color: #cfe0ea; }
 .checks label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
 .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

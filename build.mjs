@@ -14,10 +14,17 @@ execSync('npx -y esbuild js/engine/worker.js --bundle --format=iife --outfile=di
 const js = await readFile(join(root, 'dist/bundle.js'), 'utf8');
 const wjs = await readFile(join(root, 'dist/worker.js'), 'utf8');
 const css = await readFile(join(root, 'css/main.css'), 'utf8');
+// 课程/题库数据存在则内联（dist 单文件无需 fetch）
+let dataScript = '';
+try {
+  const courses = JSON.parse(await readFile(join(root, 'data/courses/courses.json'), 'utf8'));
+  const puzzles = JSON.parse(await readFile(join(root, 'data/puzzles/puzzles.json'), 'utf8'));
+  dataScript = '<script>window.__XQ_DATA__ = ' + JSON.stringify({ courses, puzzles }) + ';</script>\n';
+} catch (e) { /* 数据未生成时跳过 */ }
 let html = await readFile(join(root, 'index.html'), 'utf8');
 // 用函数替换，避免代码中的 $& 等序列被 replace 解释
 html = html.replace('<link rel="stylesheet" href="css/main.css">', () => '<style>\n' + css + '\n</style>');
 html = html.replace('<script type="module" src="js/main.js"></script>', () =>
-  '<script>window.__XQ_WORKER_SRC = ' + JSON.stringify(wjs) + ';</script>\n<script>\n' + js + '\n</script>');
+  dataScript + '<script>window.__XQ_WORKER_SRC = ' + JSON.stringify(wjs) + ';</script>\n<script>\n' + js + '\n</script>');
 await writeFile(join(root, 'dist/index.html'), html);
 console.log('已生成 dist/index.html（双击即玩，含内联 Worker）');

@@ -10,6 +10,21 @@ export const boardEl = $('board');
 export const layout = { S: 56, pad: 28 };
 export const elMap = new Array(ROWS * COLS).fill(null);
 
+/* ---------------- 视角翻转（执黑时棋盘上下/左右镜像） ---------------- */
+let flipped = false;
+export function setFlipped(v) { flipped = v; }
+export function isFlipped() { return flipped; }
+// 棋盘格 i 的渲染坐标（翻转 = (r,c)→(9-r, 8-c)，映射为对合，输入输出同函数）
+function vxy(i) {
+  const { S, pad } = layout;
+  const r = rowOf(i), c = colOf(i);
+  return { x: pad + (flipped ? 8 - c : c) * S, y: pad + (flipped ? 9 - r : r) * S };
+}
+// 视觉格 (r,c) → 棋盘下标（含翻转逆映射）
+function visualToIdx(r, c) {
+  return idx(flipped ? 9 - r : r, flipped ? 8 - c : c);
+}
+
 export function computeLayout() {
   const availW = Math.min(window.innerWidth - 20, 560);
   const availH = window.innerHeight - 170;
@@ -67,7 +82,8 @@ function buildBoardDecor() {
   marks.innerHTML = '';
   const pts = [[2, 1], [2, 7], [3, 0], [3, 2], [3, 4], [3, 6], [3, 8], [6, 0], [6, 2], [6, 4], [6, 6], [6, 8], [7, 1], [7, 7]];
   for (const [r, c] of pts) {
-    const x = pad + c * S, y = pad + r * S, o = 5, l = 7;
+    const { x, y } = vxy(idx(r, c));
+    const o = 5, l = 7;
     const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
     for (const [sx, sy] of corners) {
       if ((c === 0 && sx < 0) || (c === COLS - 1 && sx > 0)) continue;
@@ -102,8 +118,11 @@ function renderBoardNumbers() {
   const CN = ['九', '八', '七', '六', '五', '四', '三', '二', '一'];   // c=0 → 九 … c=8 → 一
   for (let c = 0; c < COLS; c++) {
     const cls = c === hiSel ? ' hi-sel' : (c === hiLast ? ' hi-last' : '');
-    addNum(layer, c, 0, String(c + 1), cls);
-    addNum(layer, c, 1, CN[c], cls);
+    // 未翻转：上=黑方 1-9、下=红方 一-九；翻转后互换
+    const topText = flipped ? CN[c] : String(c + 1);
+    const botText = flipped ? String(c + 1) : CN[c];
+    addNum(layer, c, 0, topText, cls);
+    addNum(layer, c, 1, botText, cls);
   }
 }
 function addNum(layer, c, band, text, cls) {
@@ -111,7 +130,7 @@ function addNum(layer, c, band, text, cls) {
   const el = document.createElement('div');
   el.className = 'filenum' + (cls || '');
   el.textContent = text;
-  el.style.left = (pad + c * S) + 'px';
+  el.style.left = (pad + (flipped ? 8 - c : c) * S) + 'px';
   el.style.top = (band === 0 ? pad * 0.5 : pad + 9 * S + pad * 0.5) + 'px';
   el.style.fontSize = Math.round(S * 0.26) + 'px';
   layer.appendChild(el);
@@ -119,8 +138,9 @@ function addNum(layer, c, band, text, cls) {
 export function place(el, i) {
   const { S, pad } = layout;
   const PS = S * 0.86;
-  el.style.left = (pad + colOf(i) * S - PS / 2) + 'px';
-  el.style.top = (pad + rowOf(i) * S - PS / 2) + 'px';
+  const { x, y } = vxy(i);
+  el.style.left = (x - PS / 2) + 'px';
+  el.style.top = (y - PS / 2) + 'px';
 }
 export function renderAllPieces() {
   const layer = $('layer-pieces');
@@ -172,9 +192,10 @@ export function renderLastMove() {
     const d = document.createElement('div');
     d.className = 'last-mk';
     const w = S * 0.95;
+    const { x, y } = vxy(i);
     d.style.width = w + 'px'; d.style.height = w + 'px';
-    d.style.left = (pad + colOf(i) * S) + 'px';
-    d.style.top = (pad + rowOf(i) * S) + 'px';
+    d.style.left = x + 'px';
+    d.style.top = y + 'px';
     layer.appendChild(d);
   }
   renderBoardNumbers();   // 同步刷新列数字高亮（最后落点列）
@@ -190,9 +211,10 @@ export function renderHints() {
     const d = document.createElement('div');
     d.className = 'dot' + (game.board[t] ? ' capture' : '');
     const w = S * 0.3;
+    const { x, y } = vxy(t);
     d.style.width = w + 'px'; d.style.height = w + 'px';
-    d.style.left = (pad + colOf(t) * S) + 'px';
-    d.style.top = (pad + rowOf(t) * S) + 'px';
+    d.style.left = x + 'px';
+    d.style.top = y + 'px';
     layer.appendChild(d);
   }
   // 教学推荐（受“显示推荐走法”勾选控制）
@@ -204,9 +226,10 @@ export function renderHints() {
         const d = document.createElement('div');
         d.className = 'rec-dot rec-' + i;
         const w = S * 0.92;
+        const { x, y } = vxy(sq);
         d.style.width = w + 'px'; d.style.height = w + 'px';
-        d.style.left = (pad + colOf(sq) * S) + 'px';
-        d.style.top = (pad + rowOf(sq) * S) + 'px';
+        d.style.left = x + 'px';
+        d.style.top = y + 'px';
         if (sq === r.m.from) d.textContent = String(i + 1);
         layer.appendChild(d);
       }
@@ -222,9 +245,10 @@ export function flashMove(m) {
     const d = document.createElement('div');
     d.className = 'rec-dot rec-0';
     const w = S * 0.92;
+    const { x, y } = vxy(sq);
     d.style.width = w + 'px'; d.style.height = w + 'px';
-    d.style.left = (pad + colOf(sq) * S) + 'px';
-    d.style.top = (pad + rowOf(sq) * S) + 'px';
+    d.style.left = x + 'px';
+    d.style.top = y + 'px';
     layer.appendChild(d);
   }
   setTimeout(renderHints, 1500);
@@ -239,4 +263,38 @@ export function applyCheckPulse() {
     const k = findKing(game.board, side);
     if (k >= 0 && elMap[k]) elMap[k].classList.add('checked');
   }
+}
+/* ---------------- 学习模式标记（SVG 高亮 + 箭头） ---------------- */
+export function clearStudyMarks() {
+  const svg = $('layer-arrows');
+  if (svg) svg.innerHTML = '';
+}
+/** highlights: [[r,c]...]；arrows: [[fromIdx, toIdx]...] */
+export function renderStudyMarks(highlights, arrows) {
+  const svg = $('layer-arrows');
+  if (!svg) return;
+  const { S, pad } = layout;
+  const W = S * 8 + pad * 2, H = S * 9 + pad * 2;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  let s = '';
+  for (const [r, c] of (highlights || [])) {
+    const w = S * 0.92;
+    const { x, y } = vxy(idx(r, c));
+    s += '<rect x="' + (x - w / 2) + '" y="' + (y - w / 2) + '" width="' + w + '" height="' + w + '" rx="6" fill="rgba(255,213,79,.10)" stroke="#ffd54f" stroke-width="2"/>';
+  }
+  for (const [from, to] of (arrows || [])) {
+    const p1 = vxy(from), p2 = vxy(to);
+    const x1 = p1.x, y1 = p1.y, x2 = p2.x, y2 = p2.y;
+    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const hx = x2 - ux * S * 0.36, hy = y2 - uy * S * 0.36;   // 箭身止点，留出箭头
+    s += '<line x1="' + (x1 + ux * S * 0.3) + '" y1="' + (y1 + uy * S * 0.3) + '" x2="' + hx + '" y2="' + hy +
+      '" stroke="rgba(46,204,113,.85)" stroke-width="' + Math.max(3, S * 0.09) + '" stroke-linecap="round"/>';
+    const aw = S * 0.22, px = -uy * aw, py = ux * aw;
+    s += '<polygon points="' + x2 + ',' + y2 + ' ' + (hx + px) + ',' + (hy + py) + ' ' + (hx - px) + ',' + (hy - py) +
+      '" fill="rgba(46,204,113,.9)"/>';
+  }
+  svg.innerHTML = s;
 }

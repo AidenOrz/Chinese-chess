@@ -7,21 +7,29 @@ import { game, analysis, ui, runtime } from '../state.js';
 import { explainIllegal } from '../teach/explain.js';
 import { toast } from './panels.js';
 import { snd } from '../audio.js';
-import { boardEl, layout, elMap, place, renderHints } from './layout.js';
+import { boardEl, layout, elMap, place, renderHints, isFlipped } from './layout.js';
 import { applyFormalMove, applyAnalysisMove, aiSide } from '../app.js';
+import { tryStudyMove } from './study.js';
 
 function squareFromEvent(e) {
   const rect = boardEl.getBoundingClientRect();
   const { S, pad } = layout;
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
-  const c = Math.round((x - pad) / S), r = Math.round((y - pad) / S);
-  if (!inBoard(r, c)) return -1;
-  if (Math.abs(x - (pad + c * S)) > S * 0.48 || Math.abs(y - (pad + r * S)) > S * 0.48) return -1;
-  return idx(r, c);
+  const vc = Math.round((x - pad) / S), vr = Math.round((y - pad) / S);
+  if (vr < 0 || vr > 9 || vc < 0 || vc > 8) return -1;
+  if (Math.abs(x - (pad + vc * S)) > S * 0.48 || Math.abs(y - (pad + vr * S)) > S * 0.48) return -1;
+  return isFlipped() ? idx(9 - vr, 8 - vc) : idx(vr, vc);
 }
-function moverSide() { return analysis.active ? analysis.turn : game.turn; }
+function moverSide() {
+  if (runtime.study && runtime.study.active !== false && runtime.study.turn) return runtime.study.turn;
+  return analysis.active ? analysis.turn : game.turn;
+}
 function canControl(side) {
   if (runtime.review && runtime.review.active) return false;   // 复盘只读
+  const st = runtime.study;
+  if (st && st.kind) {   // 学习模式：跟练/习题阶段可走该走子方
+    return (st.phase === 'guided' || st.phase === 'quiz') && side === st.userSide;
+  }
   if (analysis.active) return side === analysis.turn;
   if (game.over || game.thinking) return false;
   if (game.mode === 'pvp') return side === game.turn;
@@ -52,6 +60,8 @@ function findLegalMove(from, to) {
   return null;
 }
 function doMove(from, to) {
+  const st = runtime.study;
+  if (st && st.kind) return tryStudyMove(from, to);
   const m = findLegalMove(from, to);
   if (!m) return false;
   if (analysis.active) applyAnalysisMove(m);
@@ -78,6 +88,11 @@ function handleSquareTap(i) {
   }
   const p = bd[i];
   if (!p) return;
+  if (runtime.study && runtime.study.kind) {
+    const st = runtime.study;
+    if (st.phase !== 'guided' && st.phase !== 'quiz') { toast('本步骤棋盘只读，请点“下一步”继续'); return; }
+    if (sideOf(p) !== st.userSide) { toast('习题/跟练中执' + (st.userSide === 'r' ? '红' : '黑') + '方'); return; }
+  }
   if (sideOf(p) === side && canControl(side)) select(i);
   else if (p) {
     if (analysis.active) toast('现在是' + sideName(analysis.turn) + '行棋（推演）');

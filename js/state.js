@@ -15,6 +15,8 @@ export const game = {
   humanSide: RED,
   difficulty: '5',          // AI 棋力档位 1~8（见 engine/levels.js）
   thinking: false,
+  formalRules: false,         // 正式规则模式：三次重复判和 / 长将（连续 6 次将军）判负
+  posCounts: null,            // Map<局面哈希, 出现次数>（正式规则模式下使用）
   checkStreak: { r: 0, b: 0 },   // 连续将军计数（长将判负）
   noCapture: 0                   // 无吃子步数（60回合=120步判和）
 };
