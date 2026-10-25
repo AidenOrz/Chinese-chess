@@ -169,5 +169,13 @@ document.addEventListener('xq-state-changed', () => { renderArchive(); });
 
 // PWA Service Worker（http/https 环境注册，file:// 跳过）
 if ('serviceWorker' in navigator && typeof location !== 'undefined' && location.protocol.startsWith('http')) {
+  // 新 SW 接管（skipWaiting+claim）时自动刷新一次，避免旧页面配新缓存/新页面配旧脚本混跑
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !sessionStorage.getItem('xq-sw-reloaded')) {
+      sessionStorage.setItem('xq-sw-reloaded', '1');
+      location.reload();
+    }
+  });
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

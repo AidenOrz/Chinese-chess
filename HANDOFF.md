@@ -19,7 +19,7 @@
 **验证状态**:
 - 单元/集成:9 文件全绿(含 37 项内容断言;`npm test`)
 - 浏览器实测已通过:对局/推演/复盘/刷新恢复/FEN 导入导出/Worker 思考期不冻结(点击 25ms 响应)/8 档选择/dist 单文件
-- **未完成项**:学习模式(课程四段式)与执黑翻转的浏览器端到端点击流未实测(当时浏览器面板反复掉线);其逻辑有测试覆盖且与已实测模块同构。接手后建议:`npm run serve` → 课程页点完一课 → 执黑开一局确认翻转。
+- 学习模式端到端已实测通过(2026-10 修复后):课程四段式全程(讲解→演示自动播放→跟练识别→习题解答→完成标记)+ 题库点击/两步杀(含 Worker 应手)。执黑翻转的点击流仍未单独实测,逻辑有 layout 映射单测覆盖。
 
 ## 2. 核心架构决策(为什么是这样)
 
@@ -29,7 +29,7 @@
 4. **引擎 Worker 双路**(`js/engine/client.js`):开发环境用模块 Worker(`new Worker(new URL('./worker.js', import.meta.url), {type:'module'})`);dist 由 build.mjs 把 worker 打包成 IIFE 内联为 `window.__XQ_WORKER_SRC`,运行时 Blob URL 创建(经典 Worker,file:// 也可用)。任何失败(不支持/脚本 404/超时)看门狗回退主线程同步搜索,保证可用性。
 5. **存储三级降级**(IndexedDB → localStorage → 内存,`js/store.js`):Node 测试自动落内存档,可直接测存储逻辑。三仓:games(存档,含进行中 `current`)、progress(键值:stats/elo/course-*/puzzles-done)、mistakes(错题)。
 6. **内容即数据 + 引擎验证**:课程/题库是纯 JSON,`tests/content.test.js` 用引擎逐题验证(杀棋必须在引擎最强防守下成立)。生成器 `scripts/gen-puzzles.mjs / gen-courses.mjs` 固定随机种子,重跑 md5 一致,可安全重生成。
-7. **Service Worker 策略**:导航请求网络优先(保证更新及时)+ 静态资源缓存优先(离线)。教训:v1 曾全缓存优先,导致发版后用户一直看到旧页面。**发布必改 `CACHE` 版本号**。
+7. **Service Worker 策略(v3 起统一网络优先)**:所有同源 GET 网络优先、缓存仅离线回退;SW 更新接管(activate)时会 `clients.navigate` 令已打开页面自动重载。教训两次:v1 全缓存优先发版不更新;v2 时期"资源 cache-first + 忘记 bump 版本号"导致浏览器拿到新 index.html 配旧 main.js(表现为课程/题库点击无反应,旧 JS 没有路由)。发布仍建议递增 `CACHE` 清理历史缓存。
 8. **执黑翻转 = layout 层坐标映射** `(r,c)→(9-r,8-c)`(对合映射,渲染与输入逆映射同函数),不用 CSS transform——避免与拖拽/动画/棋子字面冲突。`syncFlipped()` 在 startGame/载入存档时按 `mode==='pva' && humanSide===BLACK` 设定。
 9. **棋力分档的教学取向**(`js/engine/levels.js`):弱档靠 `blunderChance`(概率选损失≥150 的着法)+ 大 `randomWindow`,强档深度/时限递增。教学对手要点是"在恰当水平犯恰当的错"。
 10. **AI 调度竞态防护**:`runtime.aiEpoch` 世代计数,`startGame` 时 `aiEpoch++` 并 `resetWorker()`,过期回调直接丢弃。这是修复过的真实 bug(420ms 延时窗口内重开会导致 AI 在新对局错序落子)。

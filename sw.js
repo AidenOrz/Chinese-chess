@@ -1,6 +1,8 @@
-// Service Worker：导航请求（HTML）网络优先保证更新及时，静态资源缓存优先离线可用
-// 发布新版本时递增 CACHE 版本号
-const CACHE = 'xq-v2';
+// Service Worker：统一网络优先 + 缓存回退
+// 教训（两次事故）：源码资源无文件名哈希，cache-first 会在忘记递增版本号时持续发放旧 JS，
+// 造成“新 index.html + 旧 main.js”混跑（表现为页面点击无反应）。网络优先保证在线永远最新，
+// 缓存仅作离线回退；发布时仍建议递增 CACHE 以清理历史缓存。
+const CACHE = 'xq-v3';
 const PRECACHE = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png',
                   './data/courses/courses.json', './data/puzzles/puzzles.json'];
 
@@ -14,30 +16,27 @@ self.addEventListener('activate', e => {
     caches.keys()
       .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
+      // 接管后让已打开的页面立即重新加载：旧页面里可能还是无自动刷新逻辑的旧脚本
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then(wins => Promise.all(wins.map(w => w.navigate(w.url).catch(() => {}))))
   );
 });
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
-  if (e.request.mode === 'navigate' || (e.request.destination === 'document' || url.pathname.endsWith('.html'))) {
-    // 导航：网络优先，失败回退缓存（离线）
-    e.respondWith(
-      fetch(e.request).then(res => {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, copy));
-        return res;
-      }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(hit => hit || caches.match('./index.html')))
-    );
-    return;
-  }
+  const isNav = e.request.mode === 'navigate' || e.request.destination === 'document' || url.pathname.endsWith('.html');
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then(hit =>
-      hit ||
-      fetch(e.request).then(res => {
+    fetch(e.request).then(res => {
+      if (res && res.ok) {
         const copy = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, copy));
-        return res;
-      }).catch(() => caches.match('./index.html'))
+      }
+      return res;
+    }).catch(() =>
+      caches.match(e.request, { ignoreSearch: true }).then(hit =>
+        hit ||
+        (isNav ? caches.match('./index.html') : Response.error())
+      )
     )
   );
 });

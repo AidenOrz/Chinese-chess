@@ -50,5 +50,5 @@ tests/      node:test 测试（DOM 打桩 helpers/ + 内容自检 content.test.j
 
 ## 发布注意
 
-- 改动任何资源后发布，需递增 `sw.js` 中的 `CACHE` 版本号（导航请求网络优先，静态资源缓存优先）
+- Service Worker 采用**统一网络优先 + 缓存回退**（v3 起）：在线永远拿到最新资源，缓存仅用于离线兜底；SW 更新接管后会自动刷新已打开的页面。发布时仍建议递增 `sw.js` 的 `CACHE` 版本号以清理历史缓存
 - 图标由 `node scripts/gen-icons.mjs` 重新生成（纯 Node PNG 编码，无依赖）

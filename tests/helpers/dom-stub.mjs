@@ -4,7 +4,9 @@ export function installDomStub() {
     style: {}, dataset: {}, value: '', checked: false, disabled: false,
     className: '', innerHTML: '', textContent: '',
     classList: { add() {}, remove() {}, contains() { return false; } },
+    setAttribute() {}, removeAttribute() {},
     appendChild() {}, remove() {}, addEventListener() {}, setPointerCapture() {},
+    insertAdjacentHTML() {},
     dispatchEvent() { return true; },
     querySelectorAll() { return []; }, getBoundingClientRect() { return { left: 0, top: 0, width: 500, height: 560 }; }
   });

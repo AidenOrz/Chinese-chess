@@ -5,7 +5,7 @@
  * ===================================================================== */
 import { sideOf, other, sideName, fenToBoard, legalMoves, isInCheck, moveName } from '../engine/index.js';
 import { workerSearch } from '../engine/client.js';
-import { game, ui, runtime } from '../state.js';
+import { game, analysis, ui, runtime } from '../state.js';
 import { store } from '../store.js';
 import { snd } from '../audio.js';
 import { exitAnalysis } from '../app.js';
@@ -129,7 +129,7 @@ function applyCourseStep(i) {
     st.phase = 'explain';
     setBoardFromFen(step.fen);
     renderStudyMarks(step.highlights, step.arrows);
-    courseButtons(false);
+    courseButtons(true);
   } else if (step.type === 'demo') {
     st.phase = 'demo';
     st.demoMoves = step.moves.slice();
