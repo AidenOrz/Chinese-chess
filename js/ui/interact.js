@@ -2,7 +2,7 @@
 /* =====================================================================
  * 交互（点击 + 拖拽，鼠标/触摸统一 Pointer 事件）——引入即绑定
  * ===================================================================== */
-import { idx, inBoard, sideOf, sideName, pseudoMoves, isInCheck, legalMoves } from '../engine/index.js';
+import { idx, sideOf, sideName, pseudoMoves, isInCheck, legalMoves } from '../engine/index.js';
 import { game, analysis, ui, runtime } from '../state.js';
 import { explainIllegal } from '../teach/explain.js';
 import { toast } from './panels.js';

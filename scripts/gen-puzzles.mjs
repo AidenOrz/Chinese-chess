@@ -271,7 +271,12 @@ while (puzzles.filter(p => p.category === 'mate2').length < 18 && guard++ < 2000
     });
   });
   if (!okLine || solution.length !== 2) continue;
-  const types = [...new Set(solution.map(([f]) => typeOf(bd[f])))].map(t => PIECE_CN[t]);
+  const simT = bd.slice();
+  const types = [...new Set(solution.map(([f, t]) => {
+    const ty = typeOf(simT[f]);
+    simT[t] = simT[f]; simT[f] = null;
+    return ty;
+  }))].map(t => PIECE_CN[t]);
   pushPuzzle({
     id: 'm2-' + String(puzzles.filter(p => p.category === 'mate2').length + 1).padStart(3, '0'),
     category: 'mate2',
