@@ -1,0 +1,12 @@
+{
+  "name": "chinese-chess-teach",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "中国象棋教学软件（原生 JS，零运行时依赖）",
+  "scripts": {
+    "test": "node --test tests/",
+    "build": "node build.mjs",
+    "serve": "node serve.mjs"
+  }
+}

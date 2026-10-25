@@ -1,0 +1,144 @@
+/* ============ 基础布局 ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; }
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: linear-gradient(160deg, #26313c 0%, #1c242d 100%);
+  color: #e8eef2;
+  user-select: none; -webkit-user-select: none;
+}
+.hidden { display: none !important; }
+#app { max-width: 1080px; margin: 0 auto; padding: 10px 12px 24px; }
+header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 6px 2px 10px; }
+header h1 { font-size: 22px; letter-spacing: 4px; color: #f4e3c1; font-weight: 700; }
+#status { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+#turn-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #999; display: inline-block; background: #ccc; }
+#turn-dot.r { background: #d24434; border-color: #f2b3a8; }
+#turn-dot.b { background: #2b2b2b; border-color: #777; }
+#mode-badge { font-size: 12px; background: #e67e22; color: #fff; padding: 2px 8px; border-radius: 10px; display: none; }
+#sub-status { font-size: 12px; color: #f0c674; min-height: 16px; }
+
+main { display: flex; gap: 16px; align-items: flex-start; }
+#board-col { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+#side { flex: 1 1 320px; min-width: 300px; display: flex; flex-direction: column; gap: 10px; }
+@media (max-width: 860px) {
+  main { flex-direction: column; align-items: center; }
+  #side { width: 100%; min-width: 0; }
+}
+
+/* ============ 棋盘 ============ */
+#board {
+  position: relative;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(255,255,255,.16), transparent 60%),
+    linear-gradient(135deg, #f0d9a6 0%, #e9c98c 55%, #e3bf80 100%);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5), inset 0 0 0 3px #8a5a2b, inset 0 0 0 6px #f0d9a6;
+  touch-action: none;
+  cursor: pointer;
+}
+#layer-lines, #layer-marks, #layer-last, #layer-hints, #layer-pieces { position: absolute; inset: 0; }
+#layer-lines { z-index: 1; pointer-events: none; }
+#layer-marks { z-index: 1; pointer-events: none; }
+#layer-last  { z-index: 2; pointer-events: none; }
+#layer-hints { z-index: 3; pointer-events: none; }
+#layer-pieces{ z-index: 4; }
+.line { position: absolute; background: rgba(90, 58, 22, .85); }
+.river-text {
+  position: absolute; display: flex; justify-content: space-between; align-items: center;
+  font-family: "KaiTi", "STKaiti", serif; color: rgba(90,58,22,.55);
+  letter-spacing: 10px; font-size: 18px; padding: 0 18%;
+}
+.mk { position: absolute; width: 7px; height: 7px; border: 0 solid rgba(90,58,22,.7); }
+#layer-nums { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.filenum { position: absolute; color: rgba(90,58,22,.55); font-family: "KaiTi", "STKaiti", serif; transform: translate(-50%, -50%); white-space: nowrap; }
+.filenum.hi-sel { color: #b5342a; font-weight: 700; }
+.filenum.hi-last { color: rgba(190,85,25,.95); font-weight: 700; }
+.frame { position: absolute; border: 2.5px solid rgba(90,58,22,.85); border-radius: 2px; pointer-events: none; }
+
+/* ============ 棋子 ============ */
+.piece {
+  position: absolute; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; font-family: "KaiTi", "STKaiti", serif; font-weight: 700;
+  background: radial-gradient(circle at 35% 30%, #fdf6e3 0%, #f1e0bb 60%, #ddc493 100%);
+  box-shadow: 0 3px 6px rgba(0,0,0,.45), inset 0 0 0 2px rgba(255,255,255,.5), inset 0 -3px 6px rgba(120,80,20,.25);
+  border: 2px solid #9c6b2f;
+  transition: left .22s ease, top .22s ease, opacity .22s ease, transform .22s ease;
+  will-change: left, top;
+}
+.piece.red { color: #b5342a; }
+.piece.black { color: #262626; }
+.piece.moving { z-index: 30; }
+.piece.drag { transition: none; z-index: 60; transform: scale(1.12); box-shadow: 0 10px 20px rgba(0,0,0,.5); }
+.piece.selected { outline: 3px solid #ffd54f; outline-offset: 1px; box-shadow: 0 0 14px rgba(255,213,79,.9); }
+.piece.checked { animation: checkPulse .8s ease-in-out infinite alternate; }
+.piece.captured { opacity: 0; transform: scale(.4); }
+@keyframes checkPulse {
+  from { box-shadow: 0 0 6px 2px rgba(230,60,40,.5), inset 0 0 0 2px rgba(255,255,255,.5); }
+  to   { box-shadow: 0 0 20px 8px rgba(230,60,40,.95), inset 0 0 0 2px rgba(255,255,255,.5); }
+}
+
+/* ============ 提示层 ============ */
+.dot { position: absolute; border-radius: 50%; background: rgba(40,140,80,.85); box-shadow: 0 0 6px rgba(40,140,80,.8); transform: translate(-50%, -50%); }
+.dot.capture { background: transparent; border: 3px solid rgba(220,70,50,.9); box-shadow: 0 0 8px rgba(220,70,50,.8); width: 86% !important; height: 86% !important; }
+.rec-dot { position: absolute; border-radius: 50%; border: 2px dashed; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; }
+.rec-0 { border-color: #2ecc71; background: rgba(46,204,113,.25); color: #d9ffe9; }
+.rec-1 { border-color: #3498db; background: rgba(52,152,219,.25); color: #dbeeff; }
+.rec-2 { border-color: #9b59b6; background: rgba(155,89,182,.25); color: #f0e2f7; }
+.last-mk { position: absolute; border: 2px solid rgba(230,126,34,.9); border-radius: 6px; transform: translate(-50%, -50%); pointer-events: none; }
+
+/* ============ 面板 ============ */
+.card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; padding: 12px 14px; }
+.card h2 { font-size: 15px; color: #f4e3c1; margin-bottom: 8px; letter-spacing: 2px; }
+.row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; }
+.row label { flex: 0 0 74px; color: #b8c6d0; }
+.row select { flex: 1; background: #33414e; color: #eef4f8; border: 1px solid #4a5a68; border-radius: 6px; padding: 5px 8px; font-size: 14px; }
+.checks { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0; font-size: 13px; color: #cfe0ea; }
+.checks label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+button {
+  background: linear-gradient(180deg, #46617a, #374d62); color: #fff;
+  border: 1px solid #5a7a99; border-radius: 7px; padding: 7px 13px; font-size: 14px; cursor: pointer;
+  transition: filter .15s, transform .05s;
+}
+button:hover:not(:disabled) { filter: brightness(1.15); }
+button:active:not(:disabled) { transform: scale(.97); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button.warn { background: linear-gradient(180deg, #a0522d, #7d3f22); border-color: #b96a41; }
+button.go { background: linear-gradient(180deg, #2e8b57, #226b43); border-color: #3fa76a; }
+.panel-body { font-size: 13px; line-height: 1.65; color: #dfe9f0; margin-top: 8px; }
+.panel-body .tag-line { color: #8fa8ba; font-size: 12px; }
+.rec-item { background: rgba(255,255,255,.05); border-left: 3px solid #2ecc71; border-radius: 6px; padding: 6px 8px; margin: 6px 0; cursor: pointer; }
+.rec-item:nth-child(2) { border-left-color: #3498db; }
+.rec-item:nth-child(3) { border-left-color: #9b59b6; }
+.rec-item b { color: #ffd97a; }
+.rec-item .why { color: #b9cbd8; }
+.rec-item .risk { color: #f0a1a1; }
+.eval-good { color: #7be3a6; font-weight: 700; }
+.eval-ok { color: #ffd97a; font-weight: 700; }
+.eval-bad { color: #ff9a8a; font-weight: 700; }
+.threat { color: #ffb3a0; }
+.tag { font-size: 11px; background: #c0392b; color: #fff; border-radius: 8px; padding: 1px 7px; vertical-align: 2px; letter-spacing: 1px; }
+
+/* ============ 被吃棋子 / Toast / 弹窗 ============ */
+#captured-row { display: flex; gap: 16px; font-size: 13px; color: #b8c6d0; min-height: 26px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.cap-chip { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; align-items: center; justify-content: center; font-family: "KaiTi", serif; font-weight: 700; background: #f1e0bb; font-size: 13px; margin: 0 1px; }
+.cap-chip.red { color: #b5342a; border: 1px solid #b5342a; }
+.cap-chip.black { color: #262626; border: 1px solid #555; }
+/* ============ 走棋记录 ============ */
+#move-list { max-height: 220px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 3px 8px; font-size: 13px; margin-top: 8px; }
+#move-list .mv { white-space: nowrap; padding: 2px 4px; border-radius: 4px; }
+#move-list .mv-no { color: #8fa8ba; margin-right: 4px; font-size: 12px; }
+#move-list .mv-red { color: #ffb0a3; }
+#move-list .mv-black { color: #cfe0ea; }
+#move-list .mv-last { background: rgba(255,213,79,.16); }
+#toast {
+  position: fixed; left: 50%; bottom: 8%; transform: translateX(-50%) translateY(20px);
+  background: rgba(20,26,32,.92); color: #ffe9c9; padding: 10px 18px; border-radius: 8px;
+  font-size: 14px; opacity: 0; pointer-events: none; transition: all .25s; z-index: 200; max-width: 86vw; text-align: center;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+#modal { position: fixed; inset: 0; background: rgba(0,0,0,.62); display: flex; align-items: center; justify-content: center; z-index: 300; }
+.modal-card { background: linear-gradient(160deg, #37475a, #2a3745); border: 1px solid #5d7590; border-radius: 14px; padding: 26px 34px; text-align: center; box-shadow: 0 16px 50px rgba(0,0,0,.6); }
+.modal-card h2 { font-size: 24px; color: #ffd97a; margin-bottom: 10px; letter-spacing: 3px; }
+.modal-card p { color: #d6e2ec; margin-bottom: 16px; }

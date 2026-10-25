@@ -1,0 +1,348 @@
+// @ts-check
+/* =====================================================================
+ * 游戏流程控制：正式对局 / 教学模式 / 推演模式
+ * ===================================================================== */
+import { sideOf, other, RED, sideName, initialBoard, isInCheck, legalMoves, moveName,
+         detectPhase, strategyPlan, chooseMove } from './engine/index.js';
+import { buildRecommendations, openingSuggestions, positionDiagnostics,
+         opponentThreats, bestReplyName, describeAiMove } from './teach/explain.js';
+import { game, analysis, ui, runtime, teachMode } from './state.js';
+import { snd } from './audio.js';
+import { $ } from './ui/dom.js';
+import { renderAllPieces, renderHints, clearRecHighlights, visualApplyMove, flashMove } from './ui/layout.js';
+import { renderCaptured, renderMoveList, updateAll, toast, showResultModal, renderTeachPanel } from './ui/panels.js';
+
+export const aiSide = () => other(game.humanSide);
+export const adviceSide = () => game.mode === 'pva' ? game.humanSide : RED;   // “我方”：人机=玩家方；双人=默认红方
+
+// 难度 → 搜索参数（与重构前行为一致）
+function aiOpts() {
+  return game.difficulty === 'easy'
+    ? { depth: 2, useQ: false, timeMs: 1500, exact: false, randomWindow: 90 }
+    : { depth: 3, useQ: true, timeMs: 4000, exact: false, randomWindow: 20 };
+}
+
+// 应用一步正式走法（唯一入口，全部经 legalMoves 校验后调用）
+export function applyFormalMove(m) {
+  const before = game.board.slice();
+  const name = moveName(game.board, m);
+  const mover = sideOf(game.board[m.from]);
+  const rec = {
+    from: m.from, to: m.to, piece: game.board[m.from], captured: game.board[m.to],
+    name, prevNoCapture: game.noCapture, prevStreakR: game.checkStreak.r, prevStreakB: game.checkStreak.b
+  };
+  game.board[m.to] = game.board[m.from]; game.board[m.from] = null;
+  game.moveHistory.push(rec);
+  const oppSide = other(mover);
+  const gaveCheck = isInCheck(game.board, oppSide);
+  rec.gaveCheck = gaveCheck;
+  // 连续将军计数：仅用于提示，长将不强制结束对局（可继续行棋）
+  if (gaveCheck) game.checkStreak[mover]++; else game.checkStreak[mover] = 0;
+  // 自然限着：连续 120 步（60 回合）无吃子判和
+  game.noCapture = rec.captured ? 0 : game.noCapture + 1;
+  ui.lastMove = { from: m.from, to: m.to };
+  ui.selected = -1; ui.targets = [];
+  game.turn = oppSide;
+  visualApplyMove(m.from, m.to);
+  renderCaptured();
+  renderMoveList();
+  // 终局判定
+  const oppHasMoves = legalMoves(game.board, oppSide).length > 0;
+  if (!oppHasMoves) {
+    game.over = true;
+    game.resultTitle = sideName(mover) + '获胜';
+    game.resultDesc = sideName(oppSide) + (gaveCheck ? '被将死' : '被困毙（无子可动）');
+  } else if (game.noCapture >= 120) {
+    game.over = true;
+    game.resultTitle = '和棋';
+    game.resultDesc = '双方 60 回合未吃子，自然限着判和';
+  }
+  updateAll();
+  if (rec.captured) snd.capture(); else snd.move();
+  if (gaveCheck && !game.over) {
+    snd.check();
+    if (game.checkStreak[mover] === 3) {
+      toast('⚠ ' + sideName(mover) + '已连续将军 3 次：正式规则长将可判负，本局仅提示不判负，可继续行棋（建议变着）');
+    }
+  }
+  // 教学反馈（不影响对局状态）
+  if (game.mode === 'pva') {
+    if (mover === game.humanSide) onHumanMoved(m, before, name);
+    else renderAiIntent(before, m);
+  }
+  if (game.over) { setTimeout(showResultModal, 350); return; }
+  if (game.mode === 'pva' && game.turn !== game.humanSide) scheduleAi();
+  else if (game.mode === 'pva' && game.turn === game.humanSide) runTeachAnalysis();
+}
+
+// AI 回合调度（异步留出 UI 刷新时间）
+export function scheduleAi() {
+  if (game.over || game.mode !== 'pva' || game.turn === game.humanSide) return;
+  game.thinking = true;
+  updateAll();
+  const epoch = runtime.aiEpoch;   // 捕获世代：期间重开/换边则本次回调作废
+  setTimeout(() => {
+    if (epoch !== runtime.aiEpoch) return;   // 对局已重开，放弃过期回调（否则会在新对局错序落子）
+    const m = chooseMove(game.board, aiSide(), aiOpts());
+    game.thinking = false;
+    if (m && !game.over) applyFormalMove(m);
+    else updateAll();
+  }, 420);
+}
+
+// 悔棋：人机模式回退到玩家行棋（含玩家最近一步）；双人模式回退双方各一步
+export function undoFormal() {
+  if (analysis.active) return toast('请先退出推演模式');
+  if (game.thinking) return toast('AI 思考中，请稍候');
+  const h = game.moveHistory;
+  if (!h.length) return toast('没有可以悔的棋');
+  let pops;
+  if (game.mode === 'pva') {
+    let lastHuman = -1;
+    for (let i = h.length - 1; i >= 0; i--) if (sideOf(h[i].piece) === game.humanSide) { lastHuman = i; break; }
+    if (lastHuman < 0) return toast('还没有你的走法可悔');
+    pops = h.length - lastHuman;
+  } else {
+    pops = Math.min(2, h.length);   // 回退双方各一步
+  }
+  for (let k = 0; k < pops; k++) {
+    const rec = h.pop();
+    game.board[rec.from] = rec.piece;
+    game.board[rec.to] = rec.captured;
+    game.noCapture = rec.prevNoCapture;
+    game.checkStreak.r = rec.prevStreakR;
+    game.checkStreak.b = rec.prevStreakB;
+    game.turn = sideOf(rec.piece);
+    ui.lastMove = h.length ? { from: h[h.length - 1].from, to: h[h.length - 1].to } : null;
+  }
+  snd.undo();
+  game.over = false; game.resultTitle = ''; game.resultDesc = '';
+  $('modal').classList.add('hidden');
+  ui.selected = -1; ui.targets = []; runtime.teachCtx = null;
+  renderAllPieces(); renderCaptured(); renderMoveList(); updateAll();
+  if (game.mode === 'pva' && game.turn === game.humanSide) runTeachAnalysis();
+}
+
+// 重新开始
+export function startGame() {
+  if (analysis.active) exitAnalysis(true);
+  game.board = initialBoard();
+  game.turn = RED;
+  game.moveHistory = [];
+  game.over = false; game.resultTitle = ''; game.resultDesc = '';
+  game.thinking = false;
+  runtime.aiEpoch++;   // 作废可能挂起的旧 AI 回调
+  game.checkStreak = { r: 0, b: 0 };
+  game.noCapture = 0;
+  ui.selected = -1; ui.targets = []; ui.lastMove = null; runtime.teachCtx = null;
+  $('modal').classList.add('hidden');
+  $('teach-feedback').innerHTML = ''; $('teach-ai').innerHTML = ''; $('teach-recommend').innerHTML = '';
+  renderAllPieces(); renderCaptured(); renderMoveList(); updateAll();
+  if (game.mode === 'pva' && game.turn !== game.humanSide) scheduleAi();
+  else if (game.mode === 'pva') runTeachAnalysis();
+}
+
+/* =====================================================================
+ * 教学模式
+ * ===================================================================== */
+export function runTeachAnalysis() {
+  clearRecHighlights();
+  $('teach-recommend').innerHTML = '';
+  if (game.mode !== 'pva' || teachMode() === 'off' || game.over ||
+      game.turn !== game.humanSide || analysis.active || game.thinking) return;
+  $('teach-recommend').innerHTML = '<span class="tag-line">正在分析局面…</span>';
+  setTimeout(() => {
+    if (game.turn !== game.humanSide || game.over || analysis.active || teachMode() === 'off') return;
+    const side = game.humanSide;
+    const bd = game.board.slice();          // 分析基于快照，期间走子也不会污染结果
+    const phase = detectPhase(bd);
+    const plyCount = game.moveHistory.length;
+    const { recs: searchRecs, best, map } = buildRecommendations(bd, side, 3, 2, plyCount);
+    // 开局库建议排在最前（去重，最多占 2 席），其余席位由搜索推荐补足
+    const merged = [];
+    const seen = new Set();
+    const firstName = plyCount ? game.moveHistory[0].name : '';
+    for (const th of openingSuggestions(bd, side, plyCount, firstName).slice(0, 2)) {
+      const key = th.from + '-' + th.to;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const sc = map[key];
+      merged.push({
+        m: { from: th.from, to: th.to },
+        v: sc === undefined ? (best ? best.v : 0) : sc,
+        idea: '开局库 · ' + th.label, reason: th.tip, risk: '暂无明显风险',
+        reply: bestReplyName(bd, { from: th.from, to: th.to }, side), theory: true
+      });
+    }
+    for (const r of searchRecs) {
+      if (merged.length >= 3) break;
+      const key = r.m.from + '-' + r.m.to;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(r);
+    }
+    runtime.teachCtx = {
+      recs: merged, best, map, phase, side,
+      plan: strategyPlan(bd, side, phase),
+      diag: positionDiagnostics(bd, side, plyCount),
+      threats: opponentThreats(bd, side)
+    };
+    renderTeachPanel();
+    renderHints();
+  }, 30);
+}
+// 玩家走完后的简要评价（好棋 / 一般 / 可改进）
+function onHumanMoved(m, beforeBoard, name) {
+  const ctx = runtime.teachCtx;              // 先取走既有分析，再清理高亮
+  clearRecHighlights();
+  const box = $('teach-feedback');
+  if (teachMode() === 'off') { box.innerHTML = ''; return; }
+  const useCtx = ctx || buildRecommendations(beforeBoard, game.humanSide, 3, 2, game.moveHistory.length);
+  if (!useCtx || !useCtx.best) { box.innerHTML = ''; return; }
+  const key = m.from + '-' + m.to;
+  const v = useCtx.map[key];
+  const best = useCtx.best.v;
+  let cls, label;
+  if (useCtx.best.m.from === m.from && useCtx.best.m.to === m.to) { cls = 'eval-good'; label = '好棋！与推荐一致'; }
+  else if (v === undefined || best - v <= 30) { cls = 'eval-good'; label = '好棋！'; }
+  else if (best - v <= 120) { cls = 'eval-ok'; label = '一般'; }
+  else { cls = 'eval-bad'; label = '可改进'; }
+  let html = '你走了 <b>' + name + '</b>：<span class="' + cls + '">' + label + '</span>';
+  if (cls === 'eval-bad' && useCtx.best) html += '，更佳是「' + moveName(beforeBoard, useCtx.best.m) + '」';
+  box.innerHTML = html;
+  runtime.teachCtx = null;
+}
+// AI 走完后的意图说明
+function renderAiIntent(beforeBoard, m) {
+  const box = $('teach-ai');
+  if (game.mode !== 'pva' || teachMode() === 'off') { box.innerHTML = ''; return; }
+  box.innerHTML = '<span class="tag-line">' + describeAiMove(beforeBoard, m, aiSide(), game.moveHistory.length) + '</span>';
+}
+
+/* =====================================================================
+ * 推演模式
+ * ===================================================================== */
+export function enterAnalysis() {
+  if (game.thinking) return toast('AI 思考中，请稍候');
+  analysis.active = true;
+  analysis.snapshot = {
+    board: game.board.slice(), turn: game.turn,
+    streakR: game.checkStreak.r, streakB: game.checkStreak.b, noCapture: game.noCapture
+  };
+  analysis.moves = [];
+  analysis.turn = game.turn;
+  analysis.over = false; analysis.check = isInCheck(game.board, game.turn);
+  analysis.lastMover = null;
+  ui.selected = -1; ui.targets = []; runtime.teachCtx = null;
+  clearRecHighlights();
+  $('card-analysis').classList.remove('hidden');
+  $('card-teach').classList.add('hidden');
+  $('btn-analysis').disabled = true;
+  $('btn-new').disabled = true; $('btn-undo').disabled = true;
+  ['sel-mode', 'sel-side', 'sel-diff', 'sel-teach'].forEach(id => $(id).disabled = true);
+  $('modal').classList.add('hidden');
+  renderAllPieces(); updateAll(); runAnalysisAdvice();
+}
+export function exitAnalysis(silent) {
+  if (!analysis.active) return;
+  const s = analysis.snapshot;
+  game.board = s.board.slice();
+  game.turn = s.turn;
+  game.checkStreak.r = s.streakR; game.checkStreak.b = s.streakB;
+  game.noCapture = s.noCapture;
+  analysis.active = false; analysis.moves = [];
+  ui.selected = -1; ui.targets = []; ui.lastMove = null;
+  $('card-analysis').classList.add('hidden');
+  $('card-teach').classList.remove('hidden');
+  $('btn-analysis').disabled = false;
+  $('btn-new').disabled = false; $('btn-undo').disabled = false;
+  ['sel-mode', 'sel-side', 'sel-diff', 'sel-teach'].forEach(id => $(id).disabled = false);
+  renderAllPieces(); renderCaptured(); renderMoveList(); updateAll();
+  if (!silent && game.mode === 'pva') {
+    if (game.turn !== game.humanSide && !game.over) scheduleAi();
+    else if (game.turn === game.humanSide && !game.over) runTeachAnalysis();
+  }
+}
+export function applyAnalysisMove(m) {
+  const mover = sideOf(game.board[m.from]);
+  const rec = { from: m.from, to: m.to, piece: game.board[m.from], captured: game.board[m.to] };
+  analysis.moves.push(rec);
+  game.board[m.to] = game.board[m.from]; game.board[m.from] = null;
+  analysis.lastMover = mover;
+  analysis.turn = other(mover);
+  ui.lastMove = { from: m.from, to: m.to };
+  ui.selected = -1; ui.targets = [];
+  analysis.check = isInCheck(game.board, analysis.turn);
+  analysis.over = legalMoves(game.board, analysis.turn).length === 0;
+  visualApplyMove(m.from, m.to);
+  if (rec.captured) snd.capture(); else snd.move();
+  if (analysis.check) snd.check();
+  updateAll(); runAnalysisAdvice();
+}
+export function undoAnalysis() {
+  if (!analysis.moves.length) return toast('没有可撤销的推演');
+  const rec = analysis.moves.pop();
+  game.board[rec.from] = rec.piece;
+  game.board[rec.to] = rec.captured;
+  analysis.turn = sideOf(rec.piece);
+  snd.undo();
+  analysis.over = false;
+  analysis.check = isInCheck(game.board, analysis.turn);
+  ui.lastMove = analysis.moves.length ? { from: analysis.moves[analysis.moves.length - 1].from, to: analysis.moves[analysis.moves.length - 1].to } : null;
+  ui.selected = -1; ui.targets = [];
+  renderAllPieces(); updateAll(); runAnalysisAdvice();
+}
+export function resetAnalysis() {
+  const s = analysis.snapshot;
+  game.board = s.board.slice();
+  analysis.turn = s.turn;
+  analysis.moves = []; analysis.over = false;
+  analysis.check = isInCheck(game.board, analysis.turn);
+  analysis.lastMover = null;
+  ui.lastMove = null; ui.selected = -1; ui.targets = [];
+  renderAllPieces(); updateAll(); runAnalysisAdvice();
+}
+function runAnalysisAdvice() {
+  const box = $('analysis-info');
+  const mySide = adviceSide();
+  let html = '<div>当前推演走子方：<b>' + sideName(analysis.turn) + '</b>　我方：<b>' + sideName(mySide) + '</b></div>';
+  if (analysis.check) html += '<div class="threat">⚠ ' + sideName(analysis.turn) + '正被将军</div>';
+  if (analysis.over) html += '<div class="threat">推演局面：' + sideName(analysis.turn) + '无子可动（' +
+    (analysis.check ? '被将死' : '被困毙') + '）——仅推演结果，不影响正式对局。请撤销/重置/退出。</div>';
+  if (analysis.lastMover && analysis.lastMover !== mySide) {
+    html += '<div style="color:#ffd97a">你刚推演了对方（' + sideName(analysis.lastMover) + '）的走法，我方应如何应对：</div>';
+  }
+  html += '<div id="analysis-recs"><span class="tag-line">正在分析推演局面…</span></div>';
+  box.innerHTML = html;
+  if (analysis.over) return;
+  setTimeout(() => {
+    if (!analysis.active) return;
+    const phase = detectPhase(game.board);
+    const { recs } = buildRecommendations(game.board, mySide, 3, 2, game.moveHistory.length);
+    const threats = opponentThreats(game.board, mySide);
+    const diag = positionDiagnostics(game.board, mySide, game.moveHistory.length);
+    let h = '<div class="why">' + strategyPlan(game.board, mySide, phase) + '</div>';
+    if (recs.length) {
+      h += '<b>我方（' + sideName(mySide) + '）推荐走法：</b>';
+      recs.forEach((r, i) => {
+        h += '<div class="rec-item" data-a="' + i + '"><b>' + (i + 1) + '. ' + moveName(game.board, r.m) + '</b> · ' + r.idea +
+          '<div class="why">理由：' + r.reason + (r.reply ? '<br>预计对方：' + r.reply : '') + '</div>' +
+          '<div class="risk">风险：' + r.risk + '</div></div>';
+      });
+    } else {
+      h += '<div class="tag-line">我方无合法走法</div>';
+    }
+    h += '<b>局面诊断：</b>' +
+      (diag.length ? diag.map(d => '<div class="threat">· ' + d + '</div>').join('') : '<div class="tag-line">暂无明显结构问题</div>');
+    h += '<b>对方威胁提示：</b>';
+    h += threats.length ? threats.map(t => '<div class="threat">· ' + t + '</div>').join('') : '<div class="tag-line">暂未发现对方明显威胁</div>';
+    const target = $('analysis-recs');
+    if (target) target.innerHTML = h;
+    target.querySelectorAll('.rec-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const r = recs[+el.dataset.a];
+        if (r) flashMove(r.m);
+      });
+    });
+  }, 30);
+}
