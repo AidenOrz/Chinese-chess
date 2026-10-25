@@ -290,8 +290,48 @@ while (puzzles.filter(p => p.category === 'mate2').length < 18 && guard++ < 2000
 assert(puzzles.filter(p => p.category === 'mate2').length === 18, 'mate2 不足 18 题');
 
 /* ================= 四、简化残局杀（7 题，3~5 步） ================= */
+/* 严格将死 AND-OR 求解器（记忆化）：solve=side 能否在 ≤n 步内强制将死对方 */
+const egMemo = new Map();
+function egKey(bd, side) {
+  let s = side;
+  for (let i = 0; i < 90; i++) { const p = bd[i]; s += p ? String.fromCharCode(p.charCodeAt(0)) : '.'; }
+  return s;
+}
+function egSolve(bd, side, n) {
+  if (n <= 0) return false;
+  const key = egKey(bd, side);
+  let e = egMemo.get(key);
+  if (!e) { e = { pMin: Infinity, dMax: 0 }; egMemo.set(key, e); }
+  if (e.pMin <= n) return true;
+  if (e.dMax >= n) return false;
+  const m = egWinMove(bd, side, n);
+  if (m) { e.pMin = Math.min(e.pMin, n); return true; }
+  e.dMax = Math.max(e.dMax, n);
+  return false;
+}
+/** 返回一个可强制 ≤n 步杀的着法（无则 null） */
+function egWinMove(bd, side, n) {
+  const opp = other(side);
+  for (const m of legalMoves(bd, side)) {
+    const win = tryMove(bd, m.from, m.to, () => {
+      const reps = legalMoves(bd, opp);
+      if (!reps.length) return isInCheck(bd, opp);      // 一步即杀（严格将死，不含困毙）
+      if (n <= 1) return false;
+      return reps.every(rep => tryMove(bd, rep.from, rep.to, () => egSolve(bd, side, n - 1)));
+    });
+    if (win) return m;
+  }
+  return null;
+}
+function egDist(bd, side, cap = 5) {
+  for (let n = 1; n <= cap; n++) {
+    egMemo.clear();
+    if (egSolve(bd, side, n)) return n;
+  }
+  return 0;
+}
 function genEndgame(kind, side, wantDist) {
-  for (let g = 0; g < 4000; g++) {
+  for (let g = 0; g < 40000; g++) {
     const bd = emptyBoard();
     let kr, kc, br, bc, tries = 0;
     do {
@@ -311,46 +351,46 @@ function genEndgame(kind, side, wantDist) {
     };
     let s;
     if (kind === 'R') {
-      s = take(i => true);
+      s = take(() => true);
       bd[s] = up('R');
     } else if (kind === 'RP') {
-      s = take(i => true);
+      s = take(() => true);
       bd[s] = up('R');
-      s = take(i => (side === RED ? i / 9 | 0 <= 4 : i / 9 | 0 >= 5));   // 兵放前半场
+      s = take(i => (side === RED ? (i / 9 | 0) <= 4 : (i / 9 | 0) >= 5));   // 兵放前半场
       if (s < 0) continue;
       bd[s] = up('P');
     } else if (kind === 'RC') {
-      s = take(i => true);
+      s = take(() => true);
       bd[s] = up('R');
-      s = take(i => true);
+      s = take(() => true);
       bd[s] = up('C');
     } else return null;
     if (!validPosition(bd) || kingsFacing(bd)) continue;
-    // 引擎证明：深度 2*wantDist 能看到恰好的强制杀
-    const r0 = engineBest(bd, side, 2 * wantDist, 1200);
-    if (!r0 || r0.v < MATE - 1000) continue;
-    const plies = MATE - r0.v;
-    if (plies % 2 === 0) continue;
-    if ((plies + 1) / 2 !== wantDist) continue;
-    // 逐着记录主变（我方引擎最优、对方引擎最强应对），终局必须严格将死
+    const dist = egDist(bd, side, 5);
+    if (dist !== wantDist) continue;
+    // 逐着记录主变：我方取求解器强制杀着法，对方用引擎最强应对（与测试重放一致）
     const line = [];
+    const lineTypes = [];
     const sim = bd.slice();
+    let remaining = dist;
     let okLine = true;
-    for (let step = 0; step < wantDist; step++) {
-      const mine = engineBest(sim, side, 2 * (wantDist - step), 3000);
+    while (remaining > 0) {
+      egMemo.clear();
+      const mine = egWinMove(sim, side, remaining);
       if (!mine) { okLine = false; break; }
-      assert(isLegal(sim, side, mine.m.from, mine.m.to), '残局主变着法不合法');
-      sim[mine.m.to] = sim[mine.m.from]; sim[mine.m.from] = null;
-      line.push([mine.m.from, mine.m.to]);
+      lineTypes.push(typeOf(sim[mine.from]));
+      sim[mine.to] = sim[mine.from]; sim[mine.from] = null;
+      line.push([mine.from, mine.to]);
       if (isMate(sim, side)) break;
-      if (step === wantDist - 1) { okLine = false; break; }
       const rep = engineBest(sim, other(side), 4);
       if (!rep) { okLine = false; break; }
       sim[rep.m.to] = sim[rep.m.from]; sim[rep.m.from] = null;
+      remaining--;
     }
     if (!okLine || !isMate(sim, side)) continue;
-    if (line.length !== wantDist) continue;
-    return { bd, side, fen: FEN(bd, side), solution: line, dist: wantDist };
+    if (line.length < 3 || line.length > 5) continue;
+    if (line.length !== dist) continue;                   // 主变长度恰为求解器给出的杀距
+    return { bd, side, fen: FEN(bd, side), solution: line, dist, types: lineTypes };
   }
   return null;
 }
@@ -369,7 +409,7 @@ for (const plan of EG_PLAN) {
   if (!eg && plan.dist !== 4) eg = genEndgame('R', plan.side, 4);
   if (!eg && plan.side !== RED) eg = genEndgame('R', RED, plan.dist);
   assert(eg, '残局生成失败：' + plan.id);
-  const pieces = [...new Set(eg.solution.map(([f]) => typeOf(eg.bd[f])))].map(t => PIECE_CN[t]).join('');
+  const pieces = [...new Set(eg.types)].map(t => PIECE_CN[t]).join('');
   const distCN = ['零', '一', '二', '三', '四', '五'][eg.dist];
   pushPuzzle({
     id: plan.id, category: 'endgame',
@@ -385,13 +425,13 @@ for (const plan of EG_PLAN) {
 const TACTICS = [
   {
     id: 'tk-001', title: '将军抽车', difficulty: 2, side: RED,
-    pieces: [[9, 4, 'K'], [3, 6, 'N'], [6, 6, 'P'], [0, 3, 'k'], [4, 3, 'r'], [3, 2, 'p']],
+    pieces: [[9, 5, 'K'], [3, 6, 'N'], [6, 6, 'P'], [0, 3, 'k'], [4, 3, 'r'], [3, 2, 'p']],
     moves: [[B(3, 6), B(2, 4)]], thenCapture: true,
     hint: '马跳中路既将军又踩车：黑方必须应将，车就保不住了。',
   },
   {
     id: 'tk-002', title: '炮打无根车', difficulty: 1, side: RED,
-    pieces: [[9, 4, 'K'], [4, 8, 'C'], [4, 6, 'P'], [6, 2, 'N'], [0, 3, 'k'], [4, 4, 'r'], [1, 8, 'n']],
+    pieces: [[9, 5, 'K'], [4, 8, 'C'], [4, 6, 'P'], [6, 2, 'N'], [0, 3, 'k'], [4, 4, 'r'], [1, 8, 'n']],
     moves: [[B(4, 8), B(4, 4)]],
     hint: '红炮隔着自家兵恰好瞄准黑车——黑车无根，一炮轰掉。',
   },
