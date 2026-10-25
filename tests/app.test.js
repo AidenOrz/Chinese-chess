@@ -7,7 +7,7 @@ const ok = (c, msg) => { if (!c) { fails++; console.error('  FAIL:', msg); } els
 
 const { idx, initialBoard, legalMoves, chooseMove, RED, BLACK } = await import('../js/engine/index.js');
 const { game, analysis, runtime } = await import('../js/state.js');
-const { applyFormalMove, scheduleAi, startGame, applyAnalysisMove, undoAnalysis } = await import('../js/app.js');
+const { applyFormalMove, scheduleAi, startGame, applyAnalysisMove, undoAnalysis, resumeCurrentGame } = await import('../js/app.js');
 
 // ---- 长将仅提示不判负 ----
 {
@@ -74,6 +74,24 @@ const { applyFormalMove, scheduleAi, startGame, applyAnalysisMove, undoAnalysis 
   const dt = Date.now() - t0;
   ok(m && legalMoves(game.board, RED).some(x => x.from === m.from && x.to === m.to), '普通难度返回合法走法');
   ok(dt < 3000, '普通难度单步耗时 ' + dt + 'ms < 3000ms');
+}
+
+// ---- 存档自动保存与恢复 ----
+{
+  const { store } = await import('../js/store.js');
+  game.mode = 'pvp'; game.humanSide = RED;
+  game.board = initialBoard(); game.turn = RED; game.over = false;
+  game.moveHistory = []; game.noCapture = 0; game.checkStreak = { r: 0, b: 0 };
+  applyFormalMove({ from: idx(7, 1), to: idx(7, 4) });   // 炮八平五（自动存档）
+  applyFormalMove({ from: idx(0, 1), to: idx(2, 2) });   // 黑马8进7
+  const rec = await store.getGame('current');
+  ok(rec && rec.moves.length === 2, '走子后自动存档（2 步）');
+  game.board = initialBoard(); game.moveHistory = []; game.turn = RED;   // 模拟刷新清空
+  const resumed = await resumeCurrentGame();
+  ok(resumed && game.moveHistory.length === 2 && game.board[idx(7, 4)] === 'C' && game.board[idx(2, 2)] === 'n',
+    '恢复对局重放正确（含位置与手数）');
+  ok(game.turn === RED, '恢复后轮到红方');
+  await store.deleteGame('current');
 }
 
 // ---- AI 调度世代：重开后过期回调不得在新对局落子（异步，汇总延后打印） ----

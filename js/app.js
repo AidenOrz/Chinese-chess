@@ -3,12 +3,14 @@
  * 游戏流程控制：正式对局 / 教学模式 / 推演模式
  * ===================================================================== */
 import { sideOf, other, RED, sideName, initialBoard, isInCheck, legalMoves, moveName,
-         detectPhase, strategyPlan } from './engine/index.js';
+         detectPhase, strategyPlan, colOf, rowOf } from './engine/index.js';
 import { chooseMove } from './engine/search.js';
 import { LEVELS, levelById } from './engine/levels.js';
 import { workerSearch, resetWorker } from './engine/client.js';
 import { buildRecommendations, openingSuggestions, positionDiagnostics,
          opponentThreats, bestReplyName, describeAiMove } from './teach/explain.js';
+import { boardToFen, fenToBoard } from './engine/fen.js';
+import { store } from './store.js';
 import { game, analysis, ui, runtime, teachMode } from './state.js';
 import { snd } from './audio.js';
 import { $ } from './ui/dom.js';
@@ -61,7 +63,11 @@ export function applyFormalMove(m) {
     game.resultDesc = '双方 60 回合未吃子，自然限着判和';
   }
   updateAll();
+  if (typeof CustomEvent !== 'undefined' && typeof document.dispatchEvent === 'function') {
+    document.dispatchEvent(new CustomEvent('xq-state-changed'));   // main.js 监听以刷新存档卡片
+  }
   if (rec.captured) snd.capture(); else snd.move();
+  if (game.over) archiveFinishedGame(); else autosave();
   if (gaveCheck && !game.over) {
     snd.check();
     if (game.checkStreak[mover] === 3) {
@@ -148,6 +154,116 @@ export function startGame() {
   renderAllPieces(); renderCaptured(); renderMoveList(); updateAll();
   if (game.mode === 'pva' && game.turn !== game.humanSide) scheduleAi();
   else if (game.mode === 'pva') runTeachAnalysis();
+}
+
+/* =====================================================================
+ * 存档与恢复（IndexedDB/localStorage/内存三级后端，见 store.js）
+ * ===================================================================== */
+function gameRecord(id) {
+  return {
+    id, mode: game.mode, humanSide: game.humanSide, difficulty: game.difficulty,
+    turn: game.turn, over: game.over, resultTitle: game.resultTitle,
+    moves: game.moveHistory.map(r => ({ from: r.from, to: r.to, piece: r.piece, captured: r.captured, name: r.name })),
+    savedAt: Date.now()
+  };
+}
+function autosave() { store.saveGame(gameRecord('current')).catch(() => {}); }
+// 终局归档：移入存档列表并清除“进行中”标记
+export function archiveFinishedGame() {
+  const id = 'game-' + Date.now();
+  store.saveGame({ ...gameRecord(id), over: true, result: game.resultTitle })
+    .then(() => store.deleteGame('current'))
+    .catch(() => {});
+}
+// 把存档重放到 game 状态（resume 与载入存档共用）
+function replayIntoGame(rec, { asFinished }) {
+  const bd = initialBoard();
+  const hist = [];
+  let noCap = 0;
+  const streak = { r: 0, b: 0 };
+  for (const mv of rec.moves) {
+    const mover = sideOf(mv.piece);
+    const gaveCheck = isInCheck(bdAfter(bd, mv), other(mover));
+    hist.push({ ...mv, prevNoCapture: noCap, prevStreakR: streak.r, prevStreakB: streak.b, gaveCheck });
+    bd[mv.to] = mv.piece; bd[mv.from] = null;
+    noCap = mv.captured ? 0 : noCap + 1;
+    if (gaveCheck) streak[mover]++; else streak[mover] = 0;
+  }
+  game.board = bd;
+  game.moveHistory = hist;
+  game.mode = rec.mode || 'pva';
+  game.humanSide = rec.humanSide || RED;
+  game.difficulty = rec.difficulty || '5';
+  game.noCapture = noCap;
+  game.checkStreak = streak;
+  if (asFinished) {
+    game.over = true;
+    game.resultTitle = rec.result || rec.resultTitle || '已结束';
+    game.resultDesc = rec.resultDesc || '';
+    game.turn = other(sideOf(rec.moves[rec.moves.length - 1].piece));
+  } else {
+    game.over = false; game.resultTitle = ''; game.resultDesc = '';
+    game.turn = rec.turn;
+  }
+  runtime.aiEpoch++;
+  runtime.teachCtx = null;
+  ui.selected = -1; ui.targets = [];
+  ui.lastMove = rec.moves.length ? { from: rec.moves[rec.moves.length - 1].from, to: rec.moves[rec.moves.length - 1].to } : null;
+}
+function bdAfter(bd, mv) {   // 走完一步后的棋盘副本（用于重放时判定将军）
+  const b = bd.slice();
+  b[mv.to] = b[mv.from]; b[mv.from] = null;
+  return b;
+}
+/** 启动时恢复进行中对局；无可恢复返回 false */
+export async function resumeCurrentGame() {
+  const rec = await store.getGame('current');
+  if (!rec || !Array.isArray(rec.moves) || !rec.moves.length || rec.over) return false;
+  replayIntoGame(rec, { asFinished: false });
+  renderAllPieces(); renderCaptured(); renderMoveList(); updateAll();
+  if (game.mode === 'pva' && game.turn !== game.humanSide) scheduleAi();
+  else if (game.mode === 'pva') runTeachAnalysis();
+  return true;
+}
+/** 载入一份历史存档（只读浏览，可悔棋回到可下状态） */
+export async function loadArchiveGame(id) {
+  const rec = await store.getGame(id);
+  if (!rec || !rec.moves || !rec.moves.length) return false;
+  if (analysis.active) exitAnalysis(true);
+  replayIntoGame(rec, { asFinished: true });
+  $('modal').classList.add('hidden');
+  renderAllPieces(); renderCaptured(); renderMoveList(); updateAll();
+  return true;
+}
+export async function deleteArchiveGame(id) { await store.deleteGame(id); }
+/** 对局文本导出：中文着法串 + ICCS 坐标串（列 a..i 从左到右，行 0..9 从红方底线向上） */
+export function gameText() {
+  if (!game.moveHistory.length) return '';
+  const zh = game.moveHistory.map((r, i) =>
+    (i % 2 === 0 ? Math.floor(i / 2) + 1 + '. ' : '') + r.name).join(' ');
+  const sq = i => 'abcdefghi'[colOf(i)] + (9 - rowOf(i));
+  const iccs = game.moveHistory.map(r => sq(r.from) + sq(r.to)).join(' ');
+  return zh + '\n' + iccs + '\n';
+}
+/** 当前局面 FEN（推演中为推演局面） */
+export function currentFen() {
+  return boardToFen(game.board, analysis.active ? analysis.turn : game.turn);
+}
+/** 把 FEN 局面导入推演棋盘（正式对局不受影响，退出推演即还原） */
+export function loadFenIntoAnalysis(fen) {
+  let parsed;
+  try { parsed = fenToBoard(fen); }
+  catch (e) { return { ok: false, msg: e.message }; }
+  if (!analysis.active) return { ok: false, msg: '请先进入推演模式再导入局面' };
+  game.board = parsed.board;
+  analysis.moves = [];
+  analysis.turn = parsed.turn;
+  analysis.lastMover = null;
+  analysis.check = isInCheck(game.board, analysis.turn);
+  analysis.over = legalMoves(game.board, analysis.turn).length === 0;
+  ui.lastMove = null; ui.selected = -1; ui.targets = [];
+  renderAllPieces(); updateAll(); runAnalysisAdvice();
+  return { ok: true };
 }
 
 /* =====================================================================

@@ -4,7 +4,9 @@
 import { other, legalMoves, isInCheck, RED } from './engine/index.js';
 import { levelById } from './engine/levels.js';
 import { game, analysis, ui, runtime, teachMode } from './state.js';
-import { startGame, undoFormal, enterAnalysis, exitAnalysis, undoAnalysis, resetAnalysis, runTeachAnalysis } from './app.js';
+import { startGame, undoFormal, enterAnalysis, exitAnalysis, undoAnalysis, resetAnalysis, runTeachAnalysis,
+         resumeCurrentGame, loadArchiveGame, deleteArchiveGame, gameText, currentFen, loadFenIntoAnalysis } from './app.js';
+import { store } from './store.js';
 import { computeLayout, renderHints, clearRecHighlights } from './ui/layout.js';
 import { renderCaptured, renderMoveList, updateAll, toast, renderTeachPanel } from './ui/panels.js';
 import { snd, isSoundOn, setSoundOn } from './audio.js';
@@ -65,6 +67,56 @@ $('btn-a-switch').addEventListener('click', () => {
   ui.selected = -1; ui.targets = [];
   updateAll(); runAnalysisAdvice();
 });
+// 局面 FEN 导入/导出（推演模式下）
+$('btn-fen-in').addEventListener('click', () => {
+  const v = $('fen-input').value.trim();
+  if (!v) return toast('请先粘贴 FEN 局面串');
+  const r = loadFenIntoAnalysis(v);
+  toast(r.ok ? '局面已导入推演' : '导入失败：' + r.msg);
+});
+$('btn-fen-out').addEventListener('click', () => {
+  $('fen-input').value = currentFen();
+  $('fen-input').select();
+  try { document.execCommand('copy'); toast('FEN 已复制到输入框/剪贴板'); }
+  catch (e) { toast('FEN 已填入输入框，请手动复制'); }
+});
+
+// ---- 对局存档 ----
+async function renderArchive() {
+  const box = $('archive-list');
+  const games = await store.listGames();
+  const rows = [];
+  if (game.moveHistory.length && !game.over) {
+    rows.push('<div class="arch-item"><b>当前对局</b> · 进行中 ' + game.moveHistory.length + ' 步</div>');
+  }
+  for (const g of games) {
+    if (g.id === 'current') continue;
+    const d = new Date(g.savedAt || 0);
+    const t = (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    rows.push('<div class="arch-item" data-id="' + g.id + '"><b>' + (g.result || '对局') + '</b> · ' +
+      (g.moves ? g.moves.length : 0) + ' 步 · ' + t +
+      ' <button class="arch-load" data-id="' + g.id + '">载入</button>' +
+      ' <button class="arch-del" data-id="' + g.id + '">删除</button>' +
+      ' <button class="arch-copy" data-id="' + g.id + '">着法</button></div>');
+  }
+  box.innerHTML = rows.length ? rows.join('') : '<span class="tag-line">暂无存档（对局结束或中途退出会自动保存）</span>';
+  box.querySelectorAll('.arch-load').forEach(el => el.addEventListener('click', async () => {
+    if (await loadArchiveGame(el.dataset.id)) toast('已载入存档，可悔棋后继续');
+    renderArchive();
+  }));
+  box.querySelectorAll('.arch-del').forEach(el => el.addEventListener('click', async () => {
+    await deleteArchiveGame(el.dataset.id);
+    renderArchive();
+  }));
+  box.querySelectorAll('.arch-copy').forEach(el => el.addEventListener('click', async () => {
+    const g = await store.getGame(el.dataset.id);
+    if (!g || !g.moves) return;
+    const zh = g.moves.map((r, i) => (i % 2 === 0 ? Math.floor(i / 2) + 1 + '. ' : '') + r.name).join(' ');
+    $('fen-input').value = zh;
+    $('fen-input').select();
+    toast('着法已填入 FEN 输入框，可手动复制');
+  }));
+}
 $('btn-again').addEventListener('click', () => { $('modal').classList.add('hidden'); startGame(); });
 $('btn-close').addEventListener('click', () => $('modal').classList.add('hidden'));
 let resizeTimer = null;
@@ -81,4 +133,15 @@ computeLayout();
 renderCaptured();
 renderMoveList();
 updateAll();
-toast('红方先行，点击棋子开始对局');
+// 恢复上次进行中的对局（无则新局提示）
+resumeCurrentGame().then(ok => {
+  if (ok) toast('已恢复上次对局，继续行棋');
+  else toast('红方先行，点击棋子开始对局');
+});
+renderArchive();
+document.addEventListener('xq-state-changed', () => { renderArchive(); });
+
+// PWA Service Worker（http/https 环境注册，file:// 跳过）
+if ('serviceWorker' in navigator && typeof location !== 'undefined' && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}

@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#2f3b47">
 <title>中国象棋 · 教学 & 推演</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
@@ -73,9 +75,18 @@
         <h2>走棋记录</h2>
         <div id="move-list"><span class="tag-line">尚未行棋</span></div>
       </section>
+      <section class="card" id="card-archive">
+        <h2>对局存档</h2>
+        <div id="archive-list" class="panel-body"><span class="tag-line">暂无存档</span></div>
+      </section>
       <section class="card hidden" id="card-analysis">
         <h2>推演分析 <span class="tag">非正式对局</span></h2>
         <div class="panel-body" id="analysis-tip">推演模式下可移动任意一方的棋子试走，不影响正式棋局。非法走法会被拒绝。</div>
+        <div class="row" style="margin-top:10px"><label>局面 FEN</label>
+          <input id="fen-input" type="text" placeholder="粘贴 FEN 后点导入">
+          <button id="btn-fen-in">导入</button>
+          <button id="btn-fen-out">导出</button>
+        </div>
         <div class="btns">
           <button id="btn-a-undo">撤销推演</button>
           <button id="btn-a-reset">重置推演</button>

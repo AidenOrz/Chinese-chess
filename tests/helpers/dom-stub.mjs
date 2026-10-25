@@ -5,6 +5,7 @@ export function installDomStub() {
     className: '', innerHTML: '', textContent: '',
     classList: { add() {}, remove() {}, contains() { return false; } },
     appendChild() {}, remove() {}, addEventListener() {}, setPointerCapture() {},
+    dispatchEvent() { return true; },
     querySelectorAll() { return []; }, getBoundingClientRect() { return { left: 0, top: 0, width: 500, height: 560 }; }
   });
   const registry = {};
