@@ -73,8 +73,25 @@ function updateButtons() {
     (game.mode === 'pva' && !game.moveHistory.some(r => sideOf(r.piece) === game.humanSide));
   $('btn-analysis').disabled = inStudy || inReview || game.thinking || analysis.active;
   $('btn-review-live').disabled = inStudy || inReview || analysis.active || game.thinking || game.moveHistory.length === 0;
-  $('btn-new').disabled = inStudy || game.thinking || analysis.active;
+  // btn-new 必须锁在复盘里：startGame 会清空 moveHistory，而 exitReview 又会用旧 boards 覆盖棋盘
+  $('btn-new').disabled = inStudy || inReview || game.thinking || analysis.active;
   $('btn-a-undo').disabled = !analysis.moves.length;
+  // 推演/复盘/学习占用棋盘时，模式与执子选择器一律锁住（改了就会 startGame 覆盖棋盘）
+  const lockModes = inStudy || inReview || analysis.active;
+  for (const id of ['sel-mode', 'sel-side', 'sel-diff']) {
+    const el = $(id);
+    if (el) el.disabled = lockModes;
+  }
+  const selTeach = $('sel-teach');
+  if (selTeach) selTeach.disabled = lockModes || game.mode === 'pvp';
+}
+/** 复盘等模式显式锁定/解锁对局控件（与 updateButtons 共用同一套规则） */
+export function setPlayControlsLocked(locked) {
+  for (const id of ['btn-new', 'btn-undo', 'btn-analysis', 'btn-review-live']) {
+    const el = $(id);
+    if (el && locked) el.disabled = true;
+  }
+  if (!locked) updateButtons();
 }
 function showResultModal() {
   $('modal-title').textContent = '对局结束 · ' + game.resultTitle;

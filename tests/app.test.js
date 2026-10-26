@@ -7,7 +7,10 @@ const ok = (c, msg) => { if (!c) { fails++; console.error('  FAIL:', msg); } els
 
 const { idx, initialBoard, legalMoves, chooseMove, RED, BLACK } = await import('../js/engine/index.js');
 const { game, analysis, runtime } = await import('../js/state.js');
-const { applyFormalMove, scheduleAi, startGame, undoFormal, applyAnalysisMove, undoAnalysis, resumeCurrentGame } = await import('../js/app.js');
+const { applyFormalMove, scheduleAi, startGame, undoFormal, applyAnalysisMove, undoAnalysis, resumeCurrentGame,
+        loadArchiveGame, setBoardOwner, runTeachAnalysis } = await import('../js/app.js');
+const { boardToFen } = await import('../js/engine/fen.js');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ---- 长将仅提示不判负 ----
 {
@@ -113,8 +116,8 @@ const { applyFormalMove, scheduleAi, startGame, undoFormal, applyAnalysisMove, u
   await store.deleteGame('current');
 }
 
-// ---- AI 调度世代：重开后过期回调不得在新对局落子（异步，汇总延后打印） ----
-{
+// ---- AI 调度世代：重开后过期回调不得在新对局落子 ----
+await (async () => {
   game.mode = 'pva'; game.humanSide = BLACK; game.difficulty = 'easy';
   game.board = initialBoard(); game.turn = RED; game.over = false;
   game.moveHistory = []; game.noCapture = 0; game.checkStreak = { r: 0, b: 0 };
@@ -122,10 +125,89 @@ const { applyFormalMove, scheduleAi, startGame, undoFormal, applyAnalysisMove, u
   scheduleAi();            // 红方（AI）排队思考
   startGame();             // 模拟 420ms 窗口内点了“重新开始”
   ok(runtime.aiEpoch === epochBefore + 1, '重开使世代递增');
-  setTimeout(() => {
-    ok(game.moveHistory.length === 1, '新对局只有新回调走的一步（实际 ' + game.moveHistory.length + ' 步）');
-    ok(game.turn === BLACK, '过期回调未错序落子，轮到玩家行棋');
-    if (fails) { console.error('\n*** ' + fails + ' 项失败 ***'); process.exitCode = 1; }
-    else console.log('=== 流程测试通过 ===');
-  }, 700);
+  await sleep(700);
+  ok(game.moveHistory.length === 1, '新对局只有新回调走的一步（实际 ' + game.moveHistory.length + ' 步）');
+  ok(game.turn === BLACK, '过期回调未错序落子，轮到玩家行棋');
+})();
+
+// ---- 载入存档必须复位 thinking（回归：曾因 epoch 递增让回调提前 return，thinking 永久卡住） ----
+await (async () => {
+  const { store } = await import('../js/store.js');
+  await store.saveGame({ id: 'finished-x', mode: 'pva', humanSide: RED, turn: BLACK, over: true, result: '红方获胜',
+    moves: [{ from: idx(7, 1), to: idx(7, 4), piece: 'C', captured: null, name: '炮八平五' }], savedAt: Date.now() });
+  game.mode = 'pva'; game.humanSide = BLACK; game.difficulty = 'easy';
+  startGame();                                   // AI(红) 开始思考
+  ok(game.thinking === true, '开局后 AI 进入思考');
+  await loadArchiveGame('finished-x');
+  ok(game.thinking === false, '载入存档后 thinking 复位（否则全盘按钮永久禁用）');
+  ok(runtime.boardOwner === 'formal', '载入存档后棋盘归属回到正式对局');
+  await sleep(900);                              // 越过 420ms 节奏窗口
+  ok(game.thinking === false, '过期回调落地后 thinking 仍为 false');
+  await store.deleteGame('finished-x');
+})();
+
+// ---- 悔棋必须同步存档（回归：曾出现“界面 0 步、存档 2 步”，刷新复活被悔的棋） ----
+await (async () => {
+  const { store } = await import('../js/store.js');
+  game.mode = 'pvp'; game.humanSide = RED; game.formalRules = false;
+  startGame();
+  applyFormalMove({ from: idx(7, 1), to: idx(7, 4) });
+  applyFormalMove({ from: idx(0, 1), to: idx(2, 2) });
+  ok((await store.getGame('current')).moves.length === 2, '走两步后自动存档 2 步');
+  undoFormal();
+  ok(game.moveHistory.length === 0, '悔棋回退到开局');
+  ok((await store.getGame('current')) === undefined, '悔棋后进行中存档被清除，刷新不会复活');
+  startGame();
+  applyFormalMove({ from: idx(7, 1), to: idx(7, 4) });
+  undoFormal();
+  ok((await store.deleteGame('current')) === undefined, '（清理）');
+})();
+
+// ---- 新对局不得继承上一局的“进行中”存档 ----
+await (async () => {
+  const { store } = await import('../js/store.js');
+  game.mode = 'pvp'; game.humanSide = RED; game.formalRules = false;
+  startGame();
+  applyFormalMove({ from: idx(7, 1), to: idx(7, 4) });
+  ok((await store.getGame('current')) !== undefined, '上一局留下进行中存档');
+  startGame();
+  ok((await store.getGame('current')) === undefined, '新对局清除进行中存档');
+  game.board = initialBoard(); game.moveHistory = []; game.turn = RED;
+  ok((await resumeCurrentGame()) === false, '刷新不会把上一局当成本局恢复');
+})();
+
+// ---- 棋盘归属守卫：非 formal 时正式落子一律拒绝 ----
+{
+  game.mode = 'pvp'; game.humanSide = RED; game.formalRules = false;
+  startGame();
+  const fenBefore = boardToFen(game.board, RED);
+  setBoardOwner('study');
+  const applied = applyFormalMove({ from: idx(7, 1), to: idx(7, 4) });
+  ok(applied === false, '学习占用棋盘时 applyFormalMove 返回 false（拒绝落子）');
+  ok(boardToFen(game.board, RED) === fenBefore && game.moveHistory.length === 0, '被拒绝的落子不改变棋盘与着法栈');
+  setBoardOwner('formal');
+  ok(applyFormalMove({ from: idx(7, 1), to: idx(7, 4) }) === true, '归属回到 formal 后正常落子');
+  // 起点为空 / 不是当前走子方的棋子：兜底拒绝（AI 回调落在换过的棋盘上时正是这种形态）
+  setBoardOwner('formal');
+  ok(game.turn === BLACK, '（前置）红炮八平五后轮到黑方');
+  ok(game.board[idx(5, 0)] === null, '（前置）第 5 行是空格');
+  ok(applyFormalMove({ from: idx(5, 0), to: idx(4, 0) }) === false, '起点为空格时拒绝（幻影着法防线）');
+  ok(applyFormalMove({ from: idx(9, 0), to: idx(8, 0) }) === false, '非当前走子方的棋子拒绝（红车在黑方回合）');
 }
+
+// ---- 学习/复盘占用棋盘时，教学分析不得写入正式对局面板 ----
+await (async () => {
+  game.mode = 'pva'; game.humanSide = RED; game.difficulty = 'easy'; game.formalRules = false;
+  startGame();
+  document.getElementById('sel-teach').value = 'detail';
+  setBoardOwner('study');
+  runtime.teachCtx = null;
+  runTeachAnalysis();
+  await sleep(250);
+  ok(runtime.teachCtx === null, '学习模式占用棋盘时不产生教学推荐（否则推荐点会画在题面上）');
+  setBoardOwner('formal');
+  document.getElementById('sel-teach').value = 'off';
+})();
+
+if (fails) { console.error('\n*** ' + fails + ' 项失败 ***'); process.exitCode = 1; }
+else console.log('=== 流程测试通过 ===');

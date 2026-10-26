@@ -10,7 +10,7 @@ import { store } from './store.js';
 import { computeLayout, renderHints, clearRecHighlights } from './ui/layout.js';
 import { renderCaptured, renderMoveList, updateAll, toast, renderTeachPanel } from './ui/panels.js';
 import { snd, isSoundOn, setSoundOn } from './audio.js';
-import { enterReview } from './ui/review.js';
+import { enterReview, exitReview } from './ui/review.js';
 import { enterStudyCourse, exitStudy } from './ui/study.js';
 import { renderCourseList, renderPuzzleList } from './ui/lists.js';
 import { initRouter, showPage } from './ui/router.js';
@@ -20,13 +20,23 @@ import './ui/interact.js';
 // ---- 路由 ----
 initRouter(async hash => {
   const h = hash.replace(/\/+$/, '') || '#';
+  // 复盘没有独立页面：任何路由跳转都应当结束复盘，否则它会一直占着主棋盘
+  if (runtime.review && runtime.review.active) exitReview();
   if (h === '#/courses') { showPage('courses'); renderCourseList(); }
   else if (h.startsWith('#/courses/')) { showPage('play'); enterStudyCourse(h.slice('#/courses/'.length)); }
   else if (h === '#/puzzles') { showPage('puzzles'); renderPuzzleList(); }
   else showPage('play');
 });
 
+// 控件 disabled 只是视觉防线；模式切换会 startGame 覆盖棋盘，这里再做一次运行期拦截
+function modeSwitchBlocked() {
+  if (runtime.study) { toast('学习模式中不能切换对局设置，请先退出学习'); return true; }
+  if (runtime.review && runtime.review.active) { toast('复盘模式中不能切换对局设置，请先退出复盘'); return true; }
+  if (analysis.active) { toast('推演模式中不能切换对局设置，请先退出推演'); return true; }
+  return false;
+}
 $('sel-mode').addEventListener('change', e => {
+  if (modeSwitchBlocked()) { e.target.value = game.mode; return; }
   game.mode = e.target.value;
   $('row-side').style.display = game.mode === 'pva' ? 'flex' : 'none';
   $('row-diff').style.display = game.mode === 'pva' ? 'flex' : 'none';
@@ -45,6 +55,7 @@ $('sel-mode').addEventListener('change', e => {
   toast(game.mode === 'pva' ? '已切换为玩家 vs AI，重新开局' : '已切换为玩家 vs 玩家，重新开局');
 });
 $('sel-side').addEventListener('change', e => {
+  if (modeSwitchBlocked()) { e.target.value = game.humanSide; return; }
   game.humanSide = e.target.value;
   startGame();
   toast('你执' + (game.humanSide === RED ? '红（先手）' : '黑（后手）') + '，重新开局');
@@ -71,7 +82,12 @@ $('chk-formal').addEventListener('change', e => {
   toast(game.formalRules ? '已开启正式规则：三次重复判和、长将判负' : '已关闭正式规则（教学宽容模式）');
 });
 $('chk-detail').addEventListener('change', () => { if (runtime.teachCtx) renderTeachPanel(); });
-$('btn-new').addEventListener('click', () => { if (analysis.active) return toast('请先退出推演模式'); startGame(); toast('新对局开始，红方先行'); });
+$('btn-new').addEventListener('click', () => {
+  if (analysis.active) return toast('请先退出推演模式');
+  if (runtime.study) return toast('请先退出学习模式');
+  if (runtime.review && runtime.review.active) return toast('请先退出复盘模式');
+  startGame(); toast('新对局开始，红方先行');
+});
 $('btn-undo').addEventListener('click', undoFormal);
 $('btn-analysis').addEventListener('click', () => { if (!analysis.active) enterAnalysis(); });
 $('btn-a-undo').addEventListener('click', undoAnalysis);

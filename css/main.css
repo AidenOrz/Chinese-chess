@@ -8,6 +8,8 @@ body {
   user-select: none; -webkit-user-select: none;
 }
 .hidden { display: none !important; }
+/* 学习模式下让出侧栏：教学/走棋记录/存档三张卡片收起（study.js 加的这个类原先没有对应规则） */
+.study-hidden { display: none !important; }
 #app { max-width: 1080px; margin: 0 auto; padding: 10px 12px 24px; }
 header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 6px 2px 10px; }
 header h1 { font-size: 22px; letter-spacing: 4px; color: #f4e3c1; font-weight: 700; }

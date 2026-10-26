@@ -4,7 +4,7 @@
 
 ## 1. 项目现状快照
 
-**一句话**:中国象棋教学软件已完成规划的全部六个阶段,10 个提交,9 个测试文件全绿,dist 单文件可分发。
+**一句话**:中国象棋教学软件已完成规划的全部六个阶段,12 个测试文件全绿,dist 单文件可分发。
 
 | 阶段 | 内容 | commit |
 |---|---|---|
@@ -17,13 +17,13 @@
 | 4 内容 | 50 题 + 10 课(引擎验证) + 内容自检测试 | `2a47c0a` |
 
 **验证状态**:
-- 单元/集成:9 文件全绿(含 37 项内容断言;`npm test`)
+- 单元/集成:12 文件全绿(含 37 项内容断言;`npm test`)
 - 浏览器实测已通过:对局/推演/复盘/刷新恢复/FEN 导入导出/Worker 思考期不冻结(点击 25ms 响应)/8 档选择/dist 单文件
 - 学习模式端到端已实测通过(2026-10 修复后):课程四段式全程(讲解→演示自动播放→跟练识别→习题解答→完成标记)+ 题库点击/两步杀(含 Worker 应手)。执黑翻转的点击流仍未单独实测,逻辑有 layout 映射单测覆盖。
 
 ## 2. 核心架构决策(为什么是这样)
 
-1. **单棋盘 + 快照隔离的"模式"架构**。推演(analysis)、复盘(review)、学习(study)都复用主棋盘,进入时各自快照 `game.board/turn`,退出还原,不触碰正式对局 `moveHistory`。四种模式互斥,进入前互相退出(app.js / ui/review.js / ui/study.js)。
+1. **单棋盘 + 快照隔离的"模式"架构**。推演(analysis)、复盘(review)、学习(study)都复用主棋盘,进入时各自快照,退出还原,不触碰正式对局 `moveHistory`。四种模式互斥,进入前互相退出(app.js / ui/review.js / ui/study.js),并由 `runtime.boardOwner` 标记当前占用者。学习模式的快照不止 `board/turn`,还包括 `over/resultTitle/resultDesc/noCapture/checkStreak/posCounts`——少任何一个,退出学习后正式对局都会带着学习期间的终局/判和状态。
 2. **引擎纯函数化**。`js/engine/*` 不读任何全局状态:`chooseMove(board, side, opts)`;难度档位参数由 UI 层 `aiOpts()` 从 `game.difficulty` 查 `LEVELS` 表组装。这是引擎能进 Worker、能在 node:test 直测的前提。
 3. **跨模块可变标量收纳在 `runtime` 对象**(`js/state.js`)。ESM 导入绑定只读、不能跨模块重赋值,所以 `teachCtx / aiEpoch / review / study` 都是 `runtime` 的字段。新增同类状态照此办理。
 4. **引擎 Worker 双路**(`js/engine/client.js`):开发环境用模块 Worker(`new Worker(new URL('./worker.js', import.meta.url), {type:'module'})`);dist 由 build.mjs 把 worker 打包成 IIFE 内联为 `window.__XQ_WORKER_SRC`,运行时 Blob URL 创建(经典 Worker,file:// 也可用)。任何失败(不支持/脚本 404/超时)看门狗回退主线程同步搜索,保证可用性。
@@ -32,7 +32,7 @@
 7. **Service Worker 策略(v3 起统一网络优先)**:所有同源 GET 网络优先、缓存仅离线回退;SW 更新接管(activate)时会 `clients.navigate` 令已打开页面自动重载。教训两次:v1 全缓存优先发版不更新;v2 时期"资源 cache-first + 忘记 bump 版本号"导致浏览器拿到新 index.html 配旧 main.js(表现为课程/题库点击无反应,旧 JS 没有路由)。发布仍建议递增 `CACHE` 清理历史缓存。
 8. **执黑翻转 = layout 层坐标映射** `(r,c)→(9-r,8-c)`(对合映射,渲染与输入逆映射同函数),不用 CSS transform——避免与拖拽/动画/棋子字面冲突。`syncFlipped()` 在 startGame/载入存档时按 `mode==='pva' && humanSide===BLACK` 设定。
 9. **棋力分档的教学取向**(`js/engine/levels.js`):弱档靠 `blunderChance`(概率选损失≥150 的着法)+ 大 `randomWindow`,强档深度/时限递增。教学对手要点是"在恰当水平犯恰当的错"。
-10. **AI 调度竞态防护**:`runtime.aiEpoch` 世代计数,`startGame` 时 `aiEpoch++` 并 `resetWorker()`,过期回调直接丢弃。这是修复过的真实 bug(420ms 延时窗口内重开会导致 AI 在新对局错序落子)。
+10. **AI 调度竞态防护**:`runtime.aiEpoch` 世代计数 + `runtime.boardOwner` 棋盘归属。任何接管棋盘的模式(`startGame`/`loadArchiveGame`/`startStudy`/`enterReview`)都走 `resetAiSession()`(`aiEpoch++` + `resetWorker()` + `thinking=false`),并改写 owner;非 `formal` 期间 `applyFormalMove` 直接拒绝,过期回调也绝不落子。这是修复两轮真实 bug 后收敛的方案——第一轮(仅 aiEpoch)漏掉了学习模式入口,第二轮(仅 owner)漏掉了 thinking 复位。
 
 ## 3. 已知问题与取舍
 
@@ -41,6 +41,8 @@
 - dist 单文件(file://)无 PWA/无 fetch,PWA 与课程数据 http 部署根目录才完整;dist 已内联课程数据所以功能不缺。
 - 复盘评分用 depth2 全窗口逐手打分(分块 120ms/片防卡顿),超深评价可选做"损失>150 的手用 depth3 复评"。
 - 教学分析(opponentThreats 等)每回合在主线程同步跑(depth2 + 1500ms 预算),极端局面可能有轻微卡顿;如需也可迁 Worker。
+- `game.thinking` 是"正式对局 AI 正在思考"的全局标志,学习/复盘/推演期间恒为 false(进模式即 `resetAiSession()`)。新增接管棋盘的入口时必须调用它,否则会出现"AI 思考中"的幽灵状态锁死全部按钮。
+- 复盘没有独立页面,路由跳转时会自动 `exitReview()`;学习模式则可以跨页面存活(从列表切走再进新课程时 `startStudy` 会先 `teardownStudy()`)。
 
 ## 4. 如何继续开发
 
@@ -51,7 +53,7 @@
 
 **加功能**:按模块归属改动;UI 流程进 `app.js`/`ui/*`;引擎保持纯函数;跨模块新状态加到 `runtime`;测试跟随(风格:顶层 `ok()` 收集 + 末尾 throw,见任意现有测试)。
 
-**测试注意**:涉及 app.js 的测试必须先 `installDomStub()` 再**动态 import**(模块顶层就访问 document);`node --test tests/*.test.js` 用通配符(目录参数在 Windows 解析有问题)。
+**测试注意**:涉及 app.js 的测试必须先 `installDomStub()` 再**动态 import**(模块顶层就访问 document)。`npm test` 用的是 `node --test "tests/*.test.js"`(引号防 shell 展开,由 Node 自身 glob 处理);**目录参数 `node --test tests/` 在 Windows 会把目录当模块名报 MODULE_NOT_FOUND**,不要改回去。
 
 **提交约定**:中文 commit message,阶段/主题前缀;每个可验证的完整单元一个提交。
 

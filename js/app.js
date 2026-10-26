@@ -16,9 +16,17 @@ import { snd } from './audio.js';
 import { $ } from './ui/dom.js';
 import { renderAllPieces, renderHints, clearRecHighlights, visualApplyMove, flashMove, setFlipped } from './ui/layout.js';
 import { renderCaptured, renderMoveList, updateAll, toast, showResultModal, renderTeachPanel } from './ui/panels.js';
+import { exitStudy } from './ui/study.js';
+import { exitReview } from './ui/review.js';
 
 export const aiSide = () => other(game.humanSide);
 export const adviceSide = () => game.mode === 'pva' ? game.humanSide : RED;   // “我方”：人机=玩家方；双人=默认红方
+
+// 终局弹窗延时句柄：新对局/换模式时要能取消，否则旧弹窗会盖在新棋盘上
+let resultModalTimer = null;
+export function cancelResultModal() {
+  if (resultModalTimer) { clearTimeout(resultModalTimer); resultModalTimer = null; }
+}
 
 // 难度（1~8 档）→ 搜索参数
 function aiOpts() {
@@ -39,8 +47,29 @@ function bumpPos(board, turn, rec) {
 // 人机模式下执黑翻转棋盘
 function syncFlipped() { setFlipped(game.mode === 'pva' && game.humanSide === BLACK); }
 
+/* ---------------- 棋盘占用者与 AI 会话 ----------------
+ * game.board 是四种模式共用的唯一棋盘。runtime.boardOwner 记录此刻谁在用它：
+ * 非 'formal' 时正式落子（含 AI 回调）一律拒绝，避免幻影着法写到推演/复盘/学习棋盘上。
+ */
+/** 切换棋盘占用者：换人即作废旧 AI 回调 */
+export function setBoardOwner(owner) { runtime.boardOwner = owner; }
+/** 终止在途 AI 搜索并复位思考标志（重开/换模式/载入存档共用） */
+export function resetAiSession() {
+  runtime.aiEpoch++;   // 作废可能挂起的旧 AI 回调
+  resetWorker();       // 终止在途的旧搜索
+  game.thinking = false;
+}
+/** 落子前置条件：必须仍是正式对局在占用棋盘 */
+export function canApplyFormalMove() {
+  return runtime.boardOwner === 'formal' && !analysis.active;
+}
+
 // 应用一步正式走法（唯一入口，全部经 legalMoves 校验后调用）
 export function applyFormalMove(m) {
+  // 棋盘已被推演/复盘/学习占用：丢弃（典型来源：模式切换后才落地的 AI 回调）
+  if (!canApplyFormalMove()) return false;
+  // 兜底校验：起点必须是当前走子方的棋子（AI 回调落在换过的棋盘上时，from 往往是空格）
+  if (!m || !game.board[m.from] || sideOf(game.board[m.from]) !== game.turn) return false;
   const before = game.board.slice();
   const name = moveName(game.board, m);
   const mover = sideOf(game.board[m.from]);
@@ -101,23 +130,27 @@ export function applyFormalMove(m) {
     if (mover === game.humanSide) onHumanMoved(m, before, name);
     else renderAiIntent(before, m);
   }
-  if (game.over) { setTimeout(showResultModal, 350); return; }
+  if (game.over) { resultModalTimer = setTimeout(showResultModal, 350); return true; }
   if (game.mode === 'pva' && game.turn !== game.humanSide) scheduleAi();
   else if (game.mode === 'pva' && game.turn === game.humanSide) runTeachAnalysis();
+  return true;
 }
 
 // AI 回合调度：搜索在 Worker 线程执行，主线程不冻结
 export function scheduleAi() {
   if (game.over || game.mode !== 'pva' || game.turn === game.humanSide) return;
+  if (runtime.boardOwner !== 'formal' || analysis.active) return;   // 棋盘已被其它模式占用
   game.thinking = true;
   updateAll();
-  const epoch = runtime.aiEpoch;   // 捕获世代：期间重开/换边则本次回调作废
+  const epoch = runtime.aiEpoch;   // 捕获世代：期间重开/换边/换模式则本次回调作废
   const t0 = Date.now();
   workerSearch(game.board.slice(), aiSide(), aiOpts()).then(m => {
     if (epoch !== runtime.aiEpoch) return;   // 对局已重开，放弃过期结果
     const wait = Math.max(0, 420 - (Date.now() - t0));   // 保持至少 420ms 的行棋节奏
     setTimeout(() => {
       if (epoch !== runtime.aiEpoch) return;
+      // 棋盘易主（进了推演/复盘/学习）时只收尾思考标志，绝不落子
+      if (runtime.boardOwner !== 'formal' || analysis.active) { game.thinking = false; updateAll(); return; }
       game.thinking = false;
       if (m && !game.over) applyFormalMove(m);
       else updateAll();
@@ -156,22 +189,26 @@ export function undoFormal() {
   }
   snd.undo();
   game.over = false; game.resultTitle = ''; game.resultDesc = '';
+  cancelResultModal();
   $('modal').classList.add('hidden');
   ui.selected = -1; ui.targets = []; runtime.teachCtx = null;
   renderAllPieces(); renderCaptured(); renderMoveList(); updateAll();
+  // 悔棋改变了棋局，存档必须跟着回退，否则刷新会把悔掉的棋复活
+  if (game.moveHistory.length) autosave(); else store.deleteGame('current').catch(() => {});
   if (game.mode === 'pva' && game.turn === game.humanSide) runTeachAnalysis();
 }
 
 // 重新开始
 export function startGame() {
   if (analysis.active) exitAnalysis(true);
+  cancelResultModal();
+  resetAiSession();          // 作废旧 AI 回调 + 复位 thinking
+  setBoardOwner('formal');
+  store.deleteGame('current').catch(() => {});   // 新对局不继承上一局的“进行中”存档
   game.board = initialBoard();
   game.turn = RED;
   game.moveHistory = [];
   game.over = false; game.resultTitle = ''; game.resultDesc = '';
-  game.thinking = false;
-  runtime.aiEpoch++;   // 作废可能挂起的旧 AI 回调
-  resetWorker();       // 终止在途的旧搜索
   game.checkStreak = { r: 0, b: 0 };
   game.noCapture = 0;
   game.posCounts = new Map();
@@ -261,8 +298,9 @@ function replayIntoGame(rec, { asFinished }) {
     game.over = false; game.resultTitle = ''; game.resultDesc = '';
     game.turn = rec.turn;
   }
-  runtime.aiEpoch++;
+  resetAiSession();
   runtime.teachCtx = null;
+  setBoardOwner('formal');
   syncFlipped();
   ui.selected = -1; ui.targets = [];
   ui.lastMove = rec.moves.length ? { from: rec.moves[rec.moves.length - 1].from, to: rec.moves[rec.moves.length - 1].to } : null;
@@ -287,6 +325,9 @@ export async function loadArchiveGame(id) {
   const rec = await store.getGame(id);
   if (!rec || !rec.moves || !rec.moves.length) return false;
   if (analysis.active) exitAnalysis(true);
+  // 学习/复盘会占着主棋盘或用旧快照覆盖它，载入前必须先退出
+  if (runtime.study) exitStudy({ silent: true });
+  if (runtime.review && runtime.review.active) exitReview();
   replayIntoGame(rec, { asFinished: true });
   $('modal').classList.add('hidden');
   renderAllPieces(); renderCaptured(); renderMoveList(); updateAll();
@@ -331,9 +372,14 @@ export function runTeachAnalysis() {
   $('teach-recommend').innerHTML = '';
   if (game.mode !== 'pva' || teachMode() === 'off' || game.over ||
       game.turn !== game.humanSide || analysis.active || game.thinking) return;
+  if (runtime.study || (runtime.review && runtime.review.active)) return;   // 棋盘已被其它模式占用
+  if (runtime.boardOwner !== 'formal') return;
   $('teach-recommend').innerHTML = '<span class="tag-line">正在分析局面…</span>';
+  const epoch = runtime.aiEpoch;   // 期间换局/换模式则丢弃本次分析结果
   setTimeout(() => {
+    if (epoch !== runtime.aiEpoch) return;
     if (game.turn !== game.humanSide || game.over || analysis.active || teachMode() === 'off') return;
+    if (runtime.boardOwner !== 'formal' || runtime.study) return;
     const side = game.humanSide;
     const bd = game.board.slice();          // 分析基于快照，期间走子也不会污染结果
     const phase = detectPhase(bd);
@@ -405,7 +451,10 @@ function renderAiIntent(beforeBoard, m) {
  * ===================================================================== */
 export function enterAnalysis() {
   if (game.thinking) return toast('AI 思考中，请稍候');
+  if (runtime.study) return toast('请先退出学习模式');
+  if (runtime.review && runtime.review.active) return toast('请先退出复盘模式');
   analysis.active = true;
+  setBoardOwner('analysis');
   analysis.snapshot = {
     board: game.board.slice(), turn: game.turn,
     streakR: game.checkStreak.r, streakB: game.checkStreak.b, noCapture: game.noCapture
@@ -432,6 +481,7 @@ export function exitAnalysis(silent) {
   game.checkStreak.r = s.streakR; game.checkStreak.b = s.streakB;
   game.noCapture = s.noCapture;
   analysis.active = false; analysis.moves = [];
+  setBoardOwner('formal');
   ui.selected = -1; ui.targets = []; ui.lastMove = null;
   $('card-analysis').classList.add('hidden');
   $('card-teach').classList.remove('hidden');

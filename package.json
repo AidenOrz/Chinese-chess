@@ -5,7 +5,7 @@
   "type": "module",
   "description": "中国象棋教学软件（原生 JS，零运行时依赖）",
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test \"tests/*.test.js\"",
     "build": "node build.mjs",
     "serve": "node serve.mjs"
   }

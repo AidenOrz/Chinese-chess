@@ -7,25 +7,32 @@ import { sideOf, initialBoard } from '../engine/index.js';
 import { game, analysis, ui, runtime } from '../state.js';
 import { scoreMove } from '../teach/review.js';
 import { store } from '../store.js';
-import { exitAnalysis } from '../app.js';
+import { exitAnalysis, setBoardOwner } from '../app.js';
 import { renderAllPieces } from './layout.js';
-import { updateAll, toast, renderMoveList } from './panels.js';
+import { updateAll, toast, renderMoveList, setPlayControlsLocked } from './panels.js';
 import { $ } from './dom.js';
 
 export function enterReview() {
   if (!game.moveHistory.length) return toast('还没有可复盘的对局');
+  if (game.thinking) return toast('AI 思考中，请稍候');
+  if (runtime.study) return toast('请先退出学习模式');
   if (analysis.active) { exitAnalysis(true); }
-  const moves = game.moveHistory;
+  // 快照化：复盘期间 AI 回调或悔棋改动 moveHistory 时，boards 与着法列表不能各说各话
+  const moves = game.moveHistory.slice();
   // 局面快照序列：boards[k] = 前 k 手走完后的棋盘
   const boards = [];
   const bd = initialBoard();
   boards.push(bd.slice());
   for (const mv of moves) { bd[mv.to] = mv.piece; bd[mv.from] = null; boards.push(bd.slice()); }
-  runtime.review = { active: true, ply: boards.length - 1, boards, entries: new Array(moves.length).fill(null), done: false };
+  runtime.review = {
+    active: true, ply: boards.length - 1, boards, moves,
+    entries: new Array(moves.length).fill(null), done: false,
+    // 退出时要还原的正式对局状态（终局棋盘 + 走子方）
+    over: game.over, resultTitle: game.resultTitle, resultDesc: game.resultDesc, turn: game.turn
+  };
+  setBoardOwner('review');
   $('card-review').classList.remove('hidden');
-  $('btn-analysis').disabled = true;
-  $('btn-undo').disabled = true;
-  $('btn-new').disabled = true;
+  setPlayControlsLocked(true);
   reviewGo(boards.length - 1);
   renderReviewList();
   // 分块评分（每片 ≤120ms，避免阻塞 UI）
@@ -56,13 +63,15 @@ export function exitReview() {
   const rv = runtime.review;
   if (!rv || !rv.active) return;
   runtime.review = null;
+  setBoardOwner('formal');
   $('card-review').classList.add('hidden');
-  $('btn-new').disabled = false;
-  // 恢复终局局面
-  const last = rv.boards[rv.boards.length - 1];
-  game.board = last.slice();
-  ui.lastMove = game.moveHistory.length
-    ? { from: game.moveHistory[game.moveHistory.length - 1].from, to: game.moveHistory[game.moveHistory.length - 1].to }
+  setPlayControlsLocked(false);
+  // 恢复终局局面与终局状态（review 期间 AI/悔棋可能改过 moveHistory，一律以快照为准）
+  game.board = rv.boards[rv.boards.length - 1].slice();
+  game.turn = rv.turn;
+  game.over = rv.over; game.resultTitle = rv.resultTitle; game.resultDesc = rv.resultDesc;
+  ui.lastMove = rv.moves.length
+    ? { from: rv.moves[rv.moves.length - 1].from, to: rv.moves[rv.moves.length - 1].to }
     : null;
   ui.selected = -1; ui.targets = [];
   renderAllPieces(); renderMoveList(); updateAll();
@@ -73,8 +82,8 @@ export function reviewGo(ply) {
   if (!rv || !rv.active) return;
   rv.ply = Math.max(0, Math.min(rv.boards.length - 1, ply));
   game.board = rv.boards[rv.ply].slice();
-  ui.lastMove = rv.ply > 0
-    ? { from: game.moveHistory[rv.ply - 1].from, to: game.moveHistory[rv.ply - 1].to }
+  ui.lastMove = rv.ply > 0 && rv.moves[rv.ply - 1]
+    ? { from: rv.moves[rv.ply - 1].from, to: rv.moves[rv.ply - 1].to }
     : null;
   ui.selected = -1; ui.targets = [];
   $('rev-pos').textContent = rv.ply + ' / ' + (rv.boards.length - 1);
@@ -87,7 +96,7 @@ function renderReviewList() {
   const box = $('rev-list');
   if (!rv || !rv.active) return;
   let html = '';
-  game.moveHistory.forEach((mv, i) => {
+  (rv.moves || game.moveHistory).forEach((mv, i) => {
     const e = rv.entries[i];
     const cur = rv.ply === i + 1 ? ' rev-cur' : '';
     html += '<span class="rev-item' + cur + '" data-ply="' + (i + 1) + '">' +

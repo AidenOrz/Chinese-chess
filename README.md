@@ -18,7 +18,7 @@
 ## 快速开始
 
 ```bash
-npm test      # node --test 全部测试（9 个文件：引擎/评估/教学/搜索/FEN/存储/复盘/流程/内容自检）
+npm test      # node --test 全部测试（12 个文件：引擎/评估/教学/搜索/FEN/存储/复盘评分/流程/内容自检/学习/复盘模式/控件守卫）
 npm run serve # 本地静态服务 http://127.0.0.1:8123/（开发用，ES Modules 需 http）
 npm run build # esbuild 打包出 dist/index.html（双击即玩，内联引擎 Worker 与全部课程数据，约 200KB）
 ```
@@ -47,6 +47,10 @@ tests/      node:test 测试（DOM 打桩 helpers/ + 内容自检 content.test.j
 - 课程 `data/courses/courses.json`：`{id,title,level,intro,steps:[explain|demo|guided|quiz]}`
 - 题库 `data/puzzles/puzzles.json`：`{id,category(mate1|mate2|endgame|tactic),difficulty,fen,side,solution:[[from,to]...],hint}`
 - 所有内容必须通过 `node tests/content.test.js` 的引擎验证（正解合法、杀棋在引擎最强防守下成立）；新增内容后跑生成器与测试即可
+
+## 模式互斥
+
+对局 / 推演 / 复盘 / 学习四种模式共用同一块棋盘，同一时刻只有一种模式占用它（`runtime.boardOwner`）。非 `formal` 期间，正式落子（含延迟落地的 AI 回调）一律被 `applyFormalMove` 拒绝；进入新模式会 `resetAiSession()` 作废在途搜索。控件与路由也有对应的运行期守卫，而不只靠 `disabled`。
 
 ## 发布注意
 

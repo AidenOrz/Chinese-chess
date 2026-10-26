@@ -26,7 +26,11 @@ export const analysis = {
 };
 export const ui = { selected: -1, targets: [], dragging: null, animating: false, lastMove: null };
 
-// 跨模块可变标量：教学上下文 / AI 对局世代
-export const runtime = { teachCtx: null, aiEpoch: 0 };
+// 跨模块可变标量
+//   teachCtx    教学分析上下文
+//   aiEpoch     AI 世代计数（重开/切换占用者时递增，过期回调直接丢弃）
+//   boardOwner  当前占用 game.board 的模式：'formal' | 'analysis' | 'study' | 'review'
+//               非 'formal' 时禁止正式落子与 AI 回调落地（见 app.js applyFormalMove / scheduleAi）
+export const runtime = { teachCtx: null, aiEpoch: 0, boardOwner: 'formal' };
 
 export const teachMode = () => $('sel-teach').value;

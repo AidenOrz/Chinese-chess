@@ -8,13 +8,14 @@ import { workerSearch } from '../engine/client.js';
 import { game, analysis, ui, runtime } from '../state.js';
 import { store } from '../store.js';
 import { snd } from '../audio.js';
-import { exitAnalysis } from '../app.js';
+import { exitAnalysis, resetAiSession, setBoardOwner, scheduleAi, runTeachAnalysis } from '../app.js';
 import { exitReview } from './review.js';
 import { renderAllPieces, renderHints, visualApplyMove, renderStudyMarks, clearStudyMarks } from './layout.js';
-import { updateAll, toast } from './panels.js';
+import { updateAll, toast, renderCaptured, renderMoveList } from './panels.js';
 import { $ } from './dom.js';
 
 let DATA = null;
+let studySessionSeq = 0;
 /** 课程/题库数据：dist 内联（window.__XQ_DATA__）或 http 环境下 fetch */
 export async function loadData() {
   if (DATA) return DATA;
@@ -75,11 +76,48 @@ function applyStudyMove(m) {
   return name;
 }
 
+// 学习会话的快照：棋盘 + 一切会被正式对局判定读取的标量。
+// 少了 over/noCapture/posCounts，退出学习后正式对局会带着学习期间的“终局/判和”状态。
+function snapshotFormal() {
+  return {
+    board: game.board.slice(), turn: game.turn,
+    over: game.over, resultTitle: game.resultTitle, resultDesc: game.resultDesc,
+    noCapture: game.noCapture,
+    checkStreak: { r: game.checkStreak.r, b: game.checkStreak.b },
+    posCounts: game.posCounts ? new Map(game.posCounts) : null
+  };
+}
+function restoreFormal(s) {
+  game.board = s.board.slice();
+  game.turn = s.turn;
+  game.over = s.over; game.resultTitle = s.resultTitle; game.resultDesc = s.resultDesc;
+  game.noCapture = s.noCapture;
+  game.checkStreak = { r: s.checkStreak.r, b: s.checkStreak.b };
+  game.posCounts = s.posCounts ? new Map(s.posCounts) : null;
+}
+/** 拆掉当前学习会话并把正式对局状态还原（不动 hash，供 startStudy 复用） */
+function teardownStudy() {
+  const st = runtime.study;
+  if (!st) return false;
+  if (st.timers) { st.timers.forEach(clearTimeout); st.timers = []; }
+  runtime.study = null;
+  if (st.snapshot) restoreFormal(st.snapshot);
+  clearStudyMarks();
+  ui.selected = -1; ui.targets = []; ui.lastMove = null;
+  return true;
+}
+
 function startStudy(st) {
   if (analysis.active) exitAnalysis(true);
   if (runtime.review && runtime.review.active) exitReview();
+  // 已有学习会话（课程 A → 列表 → 课程 B）：先清理并还原，避免快照拍到学习棋盘
+  teardownStudy();
+  // AI 可能正在旧局面上思考：作废回调，否则它会落到题面/课程棋盘上
+  resetAiSession();
+  setBoardOwner('study');
   st.timers = [];
-  st.snapshot = { board: game.board.slice(), turn: game.turn };
+  st.sessionId = ++studySessionSeq;
+  st.snapshot = snapshotFormal();
   runtime.study = st;
   runtime.teachCtx = null;
   for (const id of ['card-teach', 'card-moves', 'card-archive']) $(id).classList.add('study-hidden');
@@ -87,20 +125,22 @@ function startStudy(st) {
   clearStudyMarks();
   updateAll();
 }
-export function exitStudy() {
-  const st = runtime.study;
-  if (!st) return;
-  stopTimers();
-  runtime.study = null;
-  game.board = st.snapshot.board;
-  game.turn = st.snapshot.turn;
-  ui.selected = -1; ui.targets = []; ui.lastMove = null;
-  clearStudyMarks();
+export function exitStudy(opts) {
+  const silent = !!(opts && opts.silent);
+  if (!teardownStudy()) return;
+  setBoardOwner('formal');
   $('card-study').classList.add('hidden');
   for (const id of ['card-teach', 'card-moves', 'card-archive']) $(id).classList.remove('study-hidden');
-  renderAllPieces(); updateAll();
-  if (typeof location !== 'undefined' && location.hash !== '#/' && location.hash !== '' && location.hash !== '#') {
+  renderAllPieces(); renderCaptured(); renderMoveList(); updateAll();
+  // silent 用于“被别的入口顺手带出学习”（如载入存档），此时不该再改路由
+  if (!silent && typeof location !== 'undefined' &&
+      location.hash !== '#/' && location.hash !== '' && location.hash !== '#') {
     location.hash = '#/';
+  }
+  // 还原后重新接管 AI：学习期间轮到 AI 的对局不该停在这里
+  if (!silent && game.mode === 'pva' && !game.over) {
+    if (game.turn !== game.humanSide) scheduleAi();
+    else runTeachAnalysis();
   }
 }
 
@@ -150,7 +190,10 @@ function applyCourseStep(i) {
       { label: '提示', fn: () => toast('提示：' + moveName(game.board, { from: st.seq[st.moveIdx][0], to: st.seq[st.moveIdx][1] })) }
     ]));
   } else if (step.type === 'quiz') {
+    const session = st.sessionId;
     loadData().then(({ puzzles }) => {
+      // 数据到达时可能已经换了课程/退出了学习：只在原会话里接管
+      if (!runtime.study || runtime.study.sessionId !== session) return;
       const p = puzzles.find(x => x.id === step.puzzleId);
       if (!p) { studyAppend('（习题缺失：' + step.puzzleId + '）'); courseButtons(true); return; }
       startQuiz(p);
@@ -204,8 +247,9 @@ function onGuidedMove(m) {
     }
     // 对方着自动跟随
     const nxt = st.seq[st.moveIdx];
+    const session = st.sessionId;
     later(() => {
-      if (!runtime.study || runtime.study.phase !== 'guided') return;
+      if (!runtime.study || runtime.study.sessionId !== session || runtime.study.phase !== 'guided') return;
       applyStudyMove({ from: nxt[0], to: nxt[1] });
       st.moveIdx++;
       if (st.moveIdx >= st.seq.length) {
@@ -293,9 +337,11 @@ function onQuizMove(m) {
     if (legalMoves(game.board, st.turn).length === 0) { quizSolved(); return; }
     if (st.solIdx >= p.solution.length) { quizSolved(); return; }
     // 对方以引擎应对（题库内容已验证：正解可达成目标）
+    const session = st.sessionId;   // 会话令牌：退出再进同一题时 puzzle 是同一对象，只有令牌能区分
     workerSearch(game.board.slice(), st.turn, { depth: 3, useQ: true, timeMs: 1200, exact: false, randomWindow: 0 })
       .then(rm => {
-        if (!runtime.study || runtime.study.phase !== 'quiz' || runtime.study.puzzle !== p) return;
+        if (!runtime.study || runtime.study.sessionId !== session) return;
+        if (runtime.study.phase !== 'quiz' || runtime.study.solIdx !== st.solIdx) return;
         const legal = legalMoves(game.board, st.turn);
         const mv = (rm && legal.some(x => x.from === rm.from && x.to === rm.to)) ? rm : legal[0];
         if (!mv) { quizSolved(); return; }

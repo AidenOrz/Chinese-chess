@@ -220,6 +220,7 @@ export function renderHints() {
   // 教学推荐（受“显示推荐走法”勾选控制）
   if ($('chk-show').checked && runtime.teachCtx && runtime.teachCtx.recs.length &&
       teachMode() !== 'off' && game.mode === 'pva' && !analysis.active &&
+      !runtime.study && !(runtime.review && runtime.review.active) &&   // 学习/复盘时不要拿正式对局的推荐盖住题面
       game.turn === game.humanSide) {
     runtime.teachCtx.recs.forEach((r, i) => {
       for (const sq of [r.m.from, r.m.to]) {
