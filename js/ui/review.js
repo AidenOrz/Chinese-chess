@@ -12,6 +12,18 @@ import { renderAllPieces } from './layout.js';
 import { updateAll, toast, renderMoveList, setPlayControlsLocked } from './panels.js';
 import { $ } from './dom.js';
 
+// 复盘期间与它抢首屏的卡片：教学面板在复盘时本来就不出推荐（renderHints 已按模式屏蔽），
+// 走棋记录/存档也一样只占高度。收起它们，复盘才能和棋盘同屏。
+const REVIEW_HIDDEN_CARDS = ['card-teach', 'card-moves', 'card-archive'];
+function setReviewCardsHidden(hidden) {
+  for (const id of REVIEW_HIDDEN_CARDS) {
+    const el = $(id);
+    if (!el) continue;
+    if (hidden) el.classList.add('rev-hidden');
+    else el.classList.remove('rev-hidden');
+  }
+}
+
 export function enterReview() {
   if (!game.moveHistory.length) return toast('还没有可复盘的对局');
   if (game.thinking) return toast('AI 思考中，请稍候');
@@ -32,7 +44,11 @@ export function enterReview() {
   };
   setBoardOwner('review');
   $('card-review').classList.remove('hidden');
+  setReviewCardsHidden(true);
   setPlayControlsLocked(true);
+  // 侧栏此时若已滚动到下半部分，把复盘卡带进视野（棋盘在左列、不随滚动移动）
+  const card = $('card-review');
+  if (card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'nearest' });
   reviewGo(boards.length - 1);
   renderReviewList();
   // 分块评分（每片 ≤120ms，避免阻塞 UI）
@@ -65,6 +81,7 @@ export function exitReview() {
   runtime.review = null;
   setBoardOwner('formal');
   $('card-review').classList.add('hidden');
+  setReviewCardsHidden(false);
   setPlayControlsLocked(false);
   // 恢复终局局面与终局状态（review 期间 AI/悔棋可能改过 moveHistory，一律以快照为准）
   game.board = rv.boards[rv.boards.length - 1].slice();

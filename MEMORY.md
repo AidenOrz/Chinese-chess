@@ -18,10 +18,12 @@
 ## 2. 代码库约定
 
 - **测试风格**:tests/*.test.js 顶层 `let fails=0; ok(cond,msg)`,末尾 `if(fails) throw`;断言全中文描述。涉及 app.js 的测试:先 `import { installDomStub } from './helpers/dom-stub.mjs'; installDomStub();` 再**动态** `await import()`(模块顶层访问 document)
+- **打桩已具备判别力**:`dom-stub` 的 `classList`(add/remove/toggle/contains)、`className`、`children`、`innerHTML` 都是**真记账**的,`appendChild` 会记录子元素——"卡片被收起""数字位置"这类断言因此真的会失败。写新断言别退回去检查 `disabled` 这类可被脚本绕过的表象
 - **跑测试**:`npm test`(= `node --test "tests/*.test.js"`,必须通配符且加引号;`node --test tests/` 在 Windows 会把目录当模块名报 MODULE_NOT_FOUND)
 - **跨模块可变状态**一律挂 `state.js` 的 `runtime` 对象(ESM 导入绑定只读,不能重赋值——曾因此重构)
 - **模式互斥**:formal / analysis / review / study 四模式共用主棋盘,由 `runtime.boardOwner` 标记当前占用者。进入新模式前退出旧的(各自 `exitXxx()`)并 `resetAiSession()`;`applyFormalMove` 与 `scheduleAi` 都校验 owner,非 `formal` 一律不落子。**新增模式必须同时接入这两处**,否则 AI 回调会写到别人的棋盘上
 - **改 `game.board` 的路径必须紧跟视觉复位**:`renderAllPieces()` + 清 `ui.lastMove/selected/targets`。曾漏在 `startQuiz`(课程跟练→习题时棋盘停在旧局面、点子无反应);`setBoardFromFen` 是现成范本
+- **布局几何**:棋盘边距/列号位置一律走 `layout.js` 的 `padFor(S)/numFont(S)/pieceR(S)`,不要另起固定比例;改完必须跑 `tests/layout.test.js`(它逐档核对 `S=30..58`)`+ 真实浏览器量 `getBoundingClientRect`,`npm test` 全绿不代表渲染正确
 - **提交**:中文 message,阶段/主题前缀(如 `阶段2:FEN …`);一个可验证完整单元一个提交
 - **发布**:SW(v3 起)统一网络优先+缓存回退,在线永远最新,离线兜底可用;发布时仍建议递增 `sw.js` 的 `CACHE` 清理历史缓存(两次事故都出在"缓存优先+版本号纪律"上,详见坑 6/9)
 
@@ -40,9 +42,12 @@
 11. **`thinking` 永久卡死**(P0,同批):`loadArchiveGame` 递增 `aiEpoch` 却不清 `game.thinking`,而过期回调在 `epoch !== aiEpoch` 处直接 `return`,第 121 行的 `thinking = false` 永远执行不到。AI 思考中点"载入存档"→ 全盘按钮永久禁用、棋盘点不动,唯一自救是靠改 `sel-mode` 触发 `startGame`。教训:**"作废回调"的分支必须自带收尾**,不能把收尾逻辑放在回调的正常路径里。
 12. **课程/题库嵌套进入拍错快照**(P1,同批):路由切到列表页不退出学习,`startStudy` 直接覆盖 `runtime.study`,`st.snapshot` 拍到的是课程 A 的棋盘;退出课程 B 后正式对局变成 A 的残局,而 `moveHistory` 还是正式着法。旧会話的 `timers` 也随之失联,`stopTimers` 清不掉,两条演示定时器链叠加会倍速走子。修复:`startStudy` 先 `teardownStudy()`(还原快照 + 清定时器,不动 hash),课程/题库进入与异步回调都带 `sessionId` 令牌。
 13. **复盘漏锁 `btn-new`**(P1,同批):`updateButtons` 里 `btn-undo/btn-analysis/btn-review-live` 都有 `inReview`,`btn-new` 漏了,而 `enterReview` 手动 disable 会被随后的 `reviewGo → updateAll → updateButtons` 立刻覆盖回来。复盘中点"新对局"→ `startGame` 清空 `moveHistory` → 退出复盘又用旧 `boards` 盖回棋盘,得到"旧终局棋盘 + 空着法列表"。修复:`updateButtons` 补 `inReview`,`sel-*` 与 `btn-new` 统一由 `setPlayControlsLocked`/`updateButtons` 管理,并在 `main.js` 加运行期守卫(**`disabled` 不是防线**,脚本化点击照样触发)。
-14. **`npm test` 在 Windows 不可用**(P1,同批):`node --test tests/` 把目录当模块名,报 `MODULE_NOT_FOUND`;`README` 却承诺可用。改 `node --test "tests/*.test.js"`(引号防 shell 展开,Node 自身 glob)后 12 文件全绿。教训:文档里写的命令要真的跑一遍。
-15. **测试打桩的假通过**(P1,同批):`dom-stub` 的 `addEventListener` 原本是空函数,`element.dispatchEvent('click')` 也不会触达监听器——"点击被拦截"这类断言写出来永远是绿的,因为 handler 根本没执行。修打桩时要同时让 `addEventListener` 记账、`dispatchEvent` 传**事件对象**(不是字符串),否则回归测试形同虚设。
-16. **study.js 漏导入 `analysis`**(P0,被坑 9 掩盖):SW 修好后课程/题库点击仍无反应——`startStudy` 首行 `if (analysis.active)` 抛 ReferenceError,async 函数静默 reject,无 toast 无控制台报错(除非预先挂 unhandledrejection 监听)。这正是 HANDOFF 里"学习模式 e2e 未实测"想抓的真 bug。教训:异步事件处理器失败是**静默**的,排点击无反应先挂 `unhandledrejection` 收集器;未实测的路径优先补测。同期还发现 explain 步 `courseButtons(false)` 是死胡同(无"下一步"),已改 true。
+14. **棋盘列号被棋子完全遮挡**(P2):`pad = round(S*0.72)`,列号固定在 `pad*0.5`;而首行棋子圆盘上沿在 `pad-0.43S`——S=56 时净空隙只有 0.29S,15px 字形有 11.6px 压在棋子底下,而首行 9 列全有子,等于 18 个列号全废。修复:边距改由几何反推 `padFor(S)=0.43S+6+字号+6`,并把列号放到"外框内壁与棋子圆盘之间"那段空隙的中点。教训:**布局常量别按 S 拍脑袋给比例**,写成 `padFor(S)` 后再用测试逐档核对不变式。
+15. **侧栏复盘面板被顶出首屏**(P2):`#card-review` 排在侧栏 6 张卡之后,而棋盘在左列且不随滚动移动,进复盘必须滚动才能看到面板,于是"一边看棋盘一边看复盘"根本做不到。修复:复盘卡移到侧栏首位 + `position: sticky` 吸顶,并在复盘期间收起教学/走棋记录/存档(`.rev-hidden`)。教训:**同一视图里要并看的两块内容,不能靠 DOM 顺序碰运气**。
+16. **移动端 `innerWidth` ≠ 布局视口**(P2,改布局时新发现):`computeLayout` 只读 `window.innerWidth`。CDP 模拟 400px 宽手机时 `innerWidth` 报 438,按它算出的棋盘 474px 比视口宽 74px,页面横向溢出、棋盘被裁。修复:取 `min(innerWidth, documentElement.clientWidth)`,并让 `fitBoardS` 在放不下时继续收格宽而不是死守下限。教训:**纯逻辑单测永远发现不了这类问题**,改渲染必须用真实浏览器量 `getBoundingClientRect` + `scrollWidth`。
+17. **`npm test` 在 Windows 不可用**(P1,同批):`node --test tests/` 把目录当模块名,报 `MODULE_NOT_FOUND`;`README` 却承诺可用。改 `node --test "tests/*.test.js"`(引号防 shell 展开,Node 自身 glob)后 12 文件全绿。教训:文档里写的命令要真的跑一遍。
+18. **测试打桩的假通过**(P1,同批):`dom-stub` 的 `addEventListener` 原本是空函数,`element.dispatchEvent('click')` 也不会触达监听器——"点击被拦截"这类断言写出来永远是绿的,因为 handler 根本没执行。修打桩时要同时让 `addEventListener` 记账、`dispatchEvent` 传**事件对象**(不是字符串),否则回归测试形同虚设。
+19. **study.js 漏导入 `analysis`**(P0,被坑 9 掩盖):SW 修好后课程/题库点击仍无反应——`startStudy` 首行 `if (analysis.active)` 抛 ReferenceError,async 函数静默 reject,无 toast 无控制台报错(除非预先挂 unhandledrejection 监听)。这正是 HANDOFF 里"学习模式 e2e 未实测"想抓的真 bug。教训:异步事件处理器失败是**静默**的,排点击无反应先挂 `unhandledrejection` 收集器;未实测的路径优先补测。同期还发现 explain 步 `courseButtons(false)` 是死胡同(无"下一步"),已改 true。
 
 ## 4. 内容生产线
 

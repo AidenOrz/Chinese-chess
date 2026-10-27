@@ -35,7 +35,21 @@
       <div id="captured-row"></div>
     </div>
     <aside id="side">
-      <section class="card">
+      <!-- 复盘卡放在侧栏首位：它原先排在 6 张卡之后，一进复盘就被顶出首屏，
+           导致无法一边看棋盘一边看复盘。配合 CSS sticky 常驻视口顶部。 -->
+      <section class="card hidden" id="card-review">
+        <h2>复盘 <span class="tag" id="rev-progress">分析中…</span></h2>
+        <div class="btns">
+          <button id="btn-rv-first">|&lt;</button>
+          <button id="btn-rv-prev">&lt; 上一步</button>
+          <span id="rev-pos" style="align-self:center;min-width:72px;text-align:center;font-size:13px"></span>
+          <button id="btn-rv-next">下一步 &gt;</button>
+          <button id="btn-rv-last">&gt;|</button>
+          <button id="btn-rv-exit" class="warn">退出复盘</button>
+        </div>
+        <div id="rev-list" class="panel-body rev-list"></div>
+      </section>
+      <section class="card" id="card-settings">
         <h2>对局设置</h2>
         <div class="row"><label>对局模式</label>
           <select id="sel-mode"><option value="pva">玩家 vs AI</option><option value="pvp">玩家 vs 玩家</option></select></div>
@@ -91,18 +105,6 @@
         <h2 id="study-title">学习模式</h2>
         <div id="study-body" class="panel-body"></div>
         <div class="btns" id="study-btns"></div>
-      </section>
-      <section class="card hidden" id="card-review">
-        <h2>复盘 <span class="tag" id="rev-progress">分析中…</span></h2>
-        <div class="btns">
-          <button id="btn-rv-first">|&lt;</button>
-          <button id="btn-rv-prev">&lt; 上一步</button>
-          <span id="rev-pos" style="align-self:center;min-width:72px;text-align:center;font-size:13px"></span>
-          <button id="btn-rv-next">下一步 &gt;</button>
-          <button id="btn-rv-last">&gt;|</button>
-          <button id="btn-rv-exit" class="warn">退出复盘</button>
-        </div>
-        <div id="rev-list" class="panel-body" style="max-height:260px;overflow-y:auto"></div>
       </section>
       <section class="card hidden" id="card-analysis">
         <h2>推演分析 <span class="tag">非正式对局</span></h2>

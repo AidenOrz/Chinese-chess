@@ -105,6 +105,19 @@ main { display: flex; gap: 16px; align-items: flex-start; }
 .rev-item { display: inline-block; background: rgba(255,255,255,.05); border-radius: 5px; padding: 3px 7px; margin: 3px 3px; font-size: 13px; cursor: pointer; }
 .rev-item.rev-cur { background: rgba(255,213,79,.22); outline: 1px solid rgba(255,213,79,.6); }
 .rev-item .tag-line { margin-left: 5px; }
+/* 复盘面板：侧栏是纵向 flex，卡片按 DOM 顺序堆叠，复盘卡排在最后 6 张卡之后，
+ * 于是一进复盘就被顶到首屏外，必须滚动才能看到——而棋盘在左列、固定在视口内，
+ * 两边永远凑不到一起看。改为 sticky 吸顶 + 自限高，使复盘与棋盘同屏。 */
+#card-review {
+  position: sticky; top: 8px; z-index: 20;
+  /* sticky 要生效果，祖先不能是 overflow:hidden/auto；#side 无此限制 */
+  box-shadow: 0 10px 26px rgba(0,0,0,.45);
+  background: rgba(30,40,50,.96);
+}
+#card-review .btns { margin-top: 4px; }
+/* 复盘期间收起与之抢位置的卡片（学习/教学/走棋记录/存档），给决策留出视野 */
+.rev-hidden { display: none !important; }
+.rev-list { max-height: min(260px, 34vh); overflow-y: auto; }
 /* ============ 学习模式 / 课程题库列表 ============ */
 .lesson-item { background: rgba(255,255,255,.05); border-radius: 8px; padding: 10px 12px; margin: 8px 0; cursor: pointer; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .lesson-item:hover { background: rgba(255,255,255,.09); }

@@ -10,6 +10,44 @@ export const boardEl = $('board');
 export const layout = { S: 56, pad: 28 };
 export const elMap = new Array(ROWS * COLS).fill(null);
 
+/* ---------------- 几何常量（坐标数字带的依据） ----------------
+ * 棋子圆盘直径 = S*0.86（见 place/renderAllPieces）→ 半径 0.43S。
+ * 首行棋子的圆盘会向上越过棋盘内框，因此数字只能放在“外缘内阴影环”与
+ * 棋子圆盘之间的空隙里：pad 必须由棋子半径 + 环宽 + 字号反推，不能按 S 的
+ * 固定比例给——固定比例 0.72S 时该空隙仅 0.29S，15px 高的数字有 11.6px
+ * 压在棋子底下，首行 9 个列位全有棋子，等于 9 个数字全部看不见。
+ */
+export const PIECE_R = 0.43;                // 棋子半径 / S
+export const RING = 6;                      // 棋盘外缘内阴影环宽度（= CSS inset 6px）
+export const NUM_SLACK = 6;                 // 数字与棋子/外框之间的呼吸量
+export const numFont = S => Math.max(9, Math.round(S * 0.24));
+export const pieceR = S => S * PIECE_R;
+/** 由棋子半径 + 外缘环 + 字号反推的边距（数字带 = 环与外框之间那段空隙） */
+export const padFor = S => Math.ceil(pieceR(S) + RING + numFont(S) + NUM_SLACK);
+/** 在给定可视区里找最大可用格宽（pad 随 S 变化，不能用固定除数） */
+function fitBoardS(availW, availH) {
+  const fits = s => 8 * s + 2 * padFor(s) <= availW && 9 * s + 2 * padFor(s) <= availH;
+  let best = -1;
+  for (let s = 20; s <= 58; s++) if (fits(s)) best = s;
+  // 常规下限 30px（点击目标），只有窄到 30 都放不下时才继续收
+  return best < 0 ? 20 : Math.max(20, best);
+}
+/** 布局视口宽度：移动端 innerWidth 可能大于实际布局视口（含滚动条/缩放），取两者较小值 */
+function viewportW() {
+  const iw = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 1024;
+  const de = typeof document !== 'undefined' ? document.documentElement : null;
+  const cw = de && de.clientWidth ? de.clientWidth : 0;
+  return cw ? Math.min(iw, cw) : iw;
+}
+/** 数字带中心的 y：上带 = [外框内壁, 首行棋子圆盘上沿] 的中点；下带对称 */
+function numberCenterY(band) {
+  const { S, pad } = layout;
+  const H = 9 * S + pad * 2;
+  const top = RING, topPiece = pad - pieceR(S);          // 空隙：[6, pad-0.43S]
+  const botPiece = pad + 9 * S + pieceR(S), bot = H - RING;
+  return band === 0 ? (top + topPiece) / 2 : (botPiece + bot) / 2;
+}
+
 /* ---------------- 视角翻转（执黑时棋盘上下/左右镜像） ---------------- */
 let flipped = false;
 export function setFlipped(v) { flipped = v; }
@@ -26,11 +64,10 @@ function visualToIdx(r, c) {
 }
 
 export function computeLayout() {
-  const availW = Math.min(window.innerWidth - 20, 560);
+  const availW = Math.min(viewportW() - 20, 560);
   const availH = window.innerHeight - 170;
-  let S = Math.floor(Math.min(availW / 9.6, availH / 10.7, 58));
-  layout.S = Math.max(30, S);
-  layout.pad = Math.round(layout.S * 0.72);   // 上下留出数字坐标带
+  layout.S = fitBoardS(availW, availH);
+  layout.pad = padFor(layout.S);              // 上下留出数字坐标带（由棋子半径反推）
   boardEl.style.width = (layout.S * 8 + layout.pad * 2) + 'px';
   boardEl.style.height = (layout.S * 9 + layout.pad * 2) + 'px';
   buildBoardDecor();
@@ -131,8 +168,8 @@ function addNum(layer, c, band, text, cls) {
   el.className = 'filenum' + (cls || '');
   el.textContent = text;
   el.style.left = (pad + (flipped ? 8 - c : c) * S) + 'px';
-  el.style.top = (band === 0 ? pad * 0.5 : pad + 9 * S + pad * 0.5) + 'px';
-  el.style.fontSize = Math.round(S * 0.26) + 'px';
+  el.style.top = numberCenterY(band) + 'px';
+  el.style.fontSize = numFont(S) + 'px';
   layer.appendChild(el);
 }
 export function place(el, i) {
