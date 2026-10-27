@@ -7,7 +7,75 @@ import { ROWS, COLS, idx, rowOf, colOf, sideOf, typeOf, other, inBoard,
          crossed, backRowOf, fullName, sideName, PIECE_NAME, PIECE_CHAR, RED, BLACK,
          KNIGHT_D,
          pseudoMoves, pseudoAll, legalMoves, isInCheck, kingsFacing, attackedSquares, isDefended,
-         findKing, VAL, detectPhase, findBestMove, moveName } from '../engine/index.js';
+         findKing, VAL, detectPhase, findBestMove, moveName,
+         evalSide, materialLead } from '../engine/index.js';
+
+/* ---------------- 局面判断与评分展示 ----------------
+ * 关键区别：搜索返回的 v 是「绝对评估」（走子方视角的局面分），
+ * 落后时它必然全为负——把它当成「这步棋好不好」展示，会让用户看到
+ * "下什么都扣分"（对最强 AI 落后 10 分以上时，32 个合法着法无一为正）。
+ * 真正该给用户看的是「与最佳着的差距」：恒 ≥ 0，0 就是最佳着。
+ */
+/** 与最佳着的差距 → 展示文本（不再出现负号） */
+export function formatGap(gap) {
+  const g = Math.max(0, Number(gap) || 0);
+  // 一兵=100 分。不足半兵视为并列最佳：搜索深度有限，这种差距在噪声内。
+  if (g < 50) return '最佳';
+  const p = g / 100;
+  // 10 兵以内保留一位小数：2.5 兵若四舍五入成 3 兵，则 1.5 与 2.4 会显示成同一个数
+  const txt = p < 10 ? String(Math.round(p * 10) / 10) : String(Math.round(p));
+  return '差 ' + txt + ' 兵';
+}
+// 子力名称随走子方变化：红用 兵/相/士，黑用 卒/象/士
+const PIECE_CN = {
+  r: { R: '车', N: '马', C: '炮', P: '兵', A: '仕', B: '相' },
+  b: { R: '车', N: '马', C: '炮', P: '卒', A: '士', B: '象' }
+};
+/** 双方子力差异（side 视角），如「少 1 车、1 马」/「多 2 卒」/「双方子力相当」 */
+export function materialDetail(bd, side) {
+  const myNames = PIECE_CN[side] || PIECE_CN.r;
+  const oppNames = PIECE_CN[other(side)] || PIECE_CN.r;
+  const count = (who) => {
+    const bag = {};
+    for (let i = 0; i < ROWS * COLS; i++) {
+      const p = bd[i];
+      if (!p || sideOf(p) !== who) continue;
+      const t = typeOf(p);
+      if (t === 'K') continue;
+      bag[t] = (bag[t] || 0) + 1;
+    }
+    return bag;
+  };
+  const mine = count(side), theirs = count(other(side));
+  // 只在双方“同类棋子数目”上比多少。称呼一律用「本方」的叫法：
+  // “少 1 卒”读起来是黑方少了卒，但主语明明是红方——必须说“少 1 兵”。
+  const more = [], less = [];
+  for (const t of ['R', 'N', 'C', 'P', 'A', 'B']) {
+    const d = (mine[t] || 0) - (theirs[t] || 0);
+    if (d > 0) more.push(d + ' ' + myNames[t]);
+    else if (d < 0) less.push(-d + ' ' + myNames[t]);
+  }
+  if (!more.length && !less.length) return '双方子力相当';
+  const parts = [];
+  if (more.length) parts.push('多 ' + more.join('、'));
+  if (less.length) parts.push('少 ' + less.join('、'));
+  return parts.join('，');
+}
+/**
+ * 局面判断：把绝对评估翻译成人话，并给出子力差异。
+ * score 为走子方视角的绝对评估（缺省时现算）。
+ */
+export function positionVerdict(bd, side, score) {
+  const s = (score === undefined || score === null || isNaN(score)) ? evalSide(bd, side) : score;
+  const abs = Math.abs(s);
+  let label, cls;
+  if (abs < 60) { label = '局面大致均衡'; cls = 'eval-ok'; }
+  else if (abs < 200) { label = s > 0 ? '你方稍优' : '你方稍劣'; cls = s > 0 ? 'eval-good' : 'eval-ok'; }
+  else if (abs < 500) { label = s > 0 ? '你方明显占优' : '你方明显劣势'; cls = s > 0 ? 'eval-good' : 'eval-bad'; }
+  else if (abs < 1200) { label = s > 0 ? '你方优势很大' : '你方劣势很大'; cls = s > 0 ? 'eval-good' : 'eval-bad'; }
+  else { label = s > 0 ? '你方已近胜势' : '你方已近败势'; cls = s > 0 ? 'eval-good' : 'eval-bad'; }
+  return { label, cls, score: s, lead: materialLead(bd, side), detail: materialDetail(bd, side) };
+}
 
 // 判断某走法被对方吃掉是否吃亏：mover 落点被攻击 且（无保护 或 攻击者更便宜）
 export function isHanging(bdAfter, to, moverPiece, mySide) {
@@ -261,13 +329,21 @@ export function bestReplyName(bdBefore, m, mySide) {
 // 生成 1~3 个推荐走法（复用合法走法生成 + 搜索打分；叶结点带吃子延伸，评分更真实）
 export function buildRecommendations(board, side, maxN, depth, plyCount) {
   const { list } = findBestMove(board, side, { depth: depth || 2, useQ: true, timeMs: 1500, exact: true });
-  if (!list.length) return { recs: [], best: null, map: {} };
+  if (!list.length) return { recs: [], best: null, map: {}, gaps: {} };
+  // gap = 最佳着分 - 该着分，恒 ≥ 0。v 是绝对评估，落后时全为负，不能直接当“好坏”显示。
+  const bestV = list[0].v;
   const recs = list.slice(0, maxN || 3).map(({ m, v }) => ({
-    m, v, reply: bestReplyName(board, m, side), ...classifyReasons(board, side, m, plyCount)
+    m, v, gap: Math.max(0, bestV - v),
+    gapText: formatGap(Math.max(0, bestV - v)),
+    reply: bestReplyName(board, m, side), ...classifyReasons(board, side, m, plyCount)
   }));
-  const map = {};
-  for (const { m, v } of list) map[m.from + '-' + m.to] = v;
-  return { recs, best: list[0], map };
+  const map = {}, gaps = {};
+  for (const { m, v } of list) {
+    const k = m.from + '-' + m.to;
+    map[k] = v;
+    gaps[k] = Math.max(0, bestV - v);
+  }
+  return { recs, best: list[0], map, gaps };
 }
 // AI 走法意图说明（plies：AI 走此着前已行棋半回合数）
 export function describeAiMove(boardBefore, m, aiSide, plies) {

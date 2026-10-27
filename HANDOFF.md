@@ -4,7 +4,7 @@
 
 ## 1. 项目现状快照
 
-**一句话**:中国象棋教学软件已完成规划的全部六个阶段,13 个测试文件全绿,dist 单文件可分发。
+**一句话**:中国象棋教学软件已完成规划的全部六个阶段,14 个测试文件全绿,dist 单文件可分发。
 
 | 阶段 | 内容 | commit |
 |---|---|---|
@@ -17,7 +17,7 @@
 | 4 内容 | 50 题 + 10 课(引擎验证) + 内容自检测试 | `2a47c0a` |
 
 **验证状态**:
-- 单元/集成:13 文件全绿(含 37 项内容断言;`npm test`)
+- 单元/集成:14 文件全绿(含 37 项内容断言;`npm test`)
 - 浏览器实测已通过:对局/推演/复盘/刷新恢复/FEN 导入导出/Worker 思考期不冻结(点击 25ms 响应)/8 档选择/dist 单文件
 - 学习模式端到端已实测通过(2026-10 修复后):课程四段式全程(讲解→演示自动播放→跟练识别→习题解答→完成标记)+ 题库点击/两步杀(含 Worker 应手)。执黑翻转的点击流仍未单独实测,逻辑有 layout 映射单测覆盖。
 
@@ -32,7 +32,8 @@
 7. **Service Worker 策略(v3 起统一网络优先)**:所有同源 GET 网络优先、缓存仅离线回退;SW 更新接管(activate)时会 `clients.navigate` 令已打开页面自动重载。教训两次:v1 全缓存优先发版不更新;v2 时期"资源 cache-first + 忘记 bump 版本号"导致浏览器拿到新 index.html 配旧 main.js(表现为课程/题库点击无反应,旧 JS 没有路由)。发布仍建议递增 `CACHE` 清理历史缓存。
 8. **执黑翻转 = layout 层坐标映射** `(r,c)→(9-r,8-c)`(对合映射,渲染与输入逆映射同函数),不用 CSS transform——避免与拖拽/动画/棋子字面冲突。`syncFlipped()` 在 startGame/载入存档时按 `mode==='pva' && humanSide===BLACK` 设定。
 9. **棋力分档的教学取向**(`js/engine/levels.js`):弱档靠 `blunderChance`(概率选损失≥150 的着法)+ 大 `randomWindow`,强档深度/时限递增。教学对手要点是"在恰当水平犯恰当的错"。
-10. **AI 调度竞态防护**:`runtime.aiEpoch` 世代计数 + `runtime.boardOwner` 棋盘归属。任何接管棋盘的模式(`startGame`/`loadArchiveGame`/`startStudy`/`enterReview`)都走 `resetAiSession()`(`aiEpoch++` + `resetWorker()` + `thinking=false`),并改写 owner;非 `formal` 期间 `applyFormalMove` 直接拒绝,过期回调也绝不落子。这是修复两轮真实 bug 后收敛的方案——第一轮(仅 aiEpoch)漏掉了学习模式入口,第二轮(仅 owner)漏掉了 thinking 复位。
+10. **教学评分口径 = 与最佳着的差距,不是绝对评估**(`js/teach/explain.js` 的 `formatGap`/`buildRecommendations.gap`)。搜索返回的 `v` 是走子方视角的**绝对**局面分,落后时必然全为负;把它当"这一步好不好"显示,会让用户看到"下什么都扣分"(实测对最强 AI 落后 10 分以上时,32 个合法着法无一为正,三个推荐全部显示 `(-17.6)`,其实它们并列最佳)。`gap = 最佳v - 该着v` 恒 ≥ 0,<50 显示"最佳"、否则"差 N 兵"。**新增任何展示分数的地方都必须用 gap,不要用 v**;判断着法好坏(如 `onHumanMoved`)同理。配套 `positionVerdict`(绝对分→人话+子力差异)与 `losingPlan`(落后时好棋的标准)。
+11. **AI 调度竞态防护**:`runtime.aiEpoch` 世代计数 + `runtime.boardOwner` 棋盘归属。任何接管棋盘的模式(`startGame`/`loadArchiveGame`/`startStudy`/`enterReview`)都走 `resetAiSession()`(`aiEpoch++` + `resetWorker()` + `thinking=false`),并改写 owner;非 `formal` 期间 `applyFormalMove` 直接拒绝,过期回调也绝不落子。这是修复两轮真实 bug 后收敛的方案——第一轮(仅 aiEpoch)漏掉了学习模式入口,第二轮(仅 owner)漏掉了 thinking 复位。
 
 ## 3. 已知问题与取舍
 

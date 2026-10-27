@@ -8,7 +8,9 @@ import { chooseMove } from './engine/search.js';
 import { LEVELS, levelById } from './engine/levels.js';
 import { workerSearch, resetWorker } from './engine/client.js';
 import { buildRecommendations, openingSuggestions, positionDiagnostics,
-         opponentThreats, bestReplyName, describeAiMove } from './teach/explain.js';
+         opponentThreats, bestReplyName, describeAiMove, formatGap,
+         positionVerdict, materialDetail } from './teach/explain.js';
+import { losingPlan } from './engine/eval.js';
 import { boardToFen, fenToBoard } from './engine/fen.js';
 import { store } from './store.js';
 import { game, analysis, ui, runtime, teachMode } from './state.js';
@@ -384,7 +386,7 @@ export function runTeachAnalysis() {
     const bd = game.board.slice();          // 分析基于快照，期间走子也不会污染结果
     const phase = detectPhase(bd);
     const plyCount = game.moveHistory.length;
-    const { recs: searchRecs, best, map } = buildRecommendations(bd, side, 3, 2, plyCount);
+    const { recs: searchRecs, best, map, gaps } = buildRecommendations(bd, side, 3, 2, plyCount);
     // 开局库建议排在最前（去重，最多占 2 席），其余席位由搜索推荐补足
     const merged = [];
     const seen = new Set();
@@ -393,10 +395,11 @@ export function runTeachAnalysis() {
       const key = th.from + '-' + th.to;
       if (seen.has(key)) continue;
       seen.add(key);
-      const sc = map[key];
+      // 开局库着法若在搜索列表里就用它的真实差距，否则按并列最佳处理
+      const gap = gaps[key] === undefined ? 0 : gaps[key];
       merged.push({
         m: { from: th.from, to: th.to },
-        v: sc === undefined ? (best ? best.v : 0) : sc,
+        gap, gapText: formatGap(gap),
         idea: '开局库 · ' + th.label, reason: th.tip, risk: '暂无明显风险',
         reply: bestReplyName(bd, { from: th.from, to: th.to }, side), theory: true
       });
@@ -409,8 +412,10 @@ export function runTeachAnalysis() {
       merged.push(r);
     }
     runtime.teachCtx = {
-      recs: merged, best, map, phase, side,
+      recs: merged, best, map, gaps, phase, side,
+      verdict: positionVerdict(bd, side, best ? best.v : undefined),
       plan: strategyPlan(bd, side, phase),
+      losingTips: losingPlan(bd, side),
       diag: positionDiagnostics(bd, side, plyCount),
       threats: opponentThreats(bd, side)
     };
@@ -427,14 +432,19 @@ function onHumanMoved(m, beforeBoard, name) {
   const useCtx = ctx || buildRecommendations(beforeBoard, game.humanSide, 3, 2, game.moveHistory.length);
   if (!useCtx || !useCtx.best) { box.innerHTML = ''; return; }
   const key = m.from + '-' + m.to;
-  const v = useCtx.map[key];
-  const best = useCtx.best.v;
+  // 一律用「与最佳着的差距」判断好坏。绝对评估 v 落后时为负，
+  // 拿它当门槛（如 v <= 30）会让落后方的任何着法都被判“好棋”。
+  const gap = useCtx.gaps && useCtx.gaps[key] !== undefined
+    ? useCtx.gaps[key]
+    : Math.max(0, (useCtx.best ? useCtx.best.v : 0) - (useCtx.map[key] === undefined ? (useCtx.best ? useCtx.best.v : 0) : useCtx.map[key]));
   let cls, label;
-  if (useCtx.best.m.from === m.from && useCtx.best.m.to === m.to) { cls = 'eval-good'; label = '好棋！与推荐一致'; }
-  else if (v === undefined || best - v <= 30) { cls = 'eval-good'; label = '好棋！'; }
-  else if (best - v <= 120) { cls = 'eval-ok'; label = '一般'; }
+  if (useCtx.best && useCtx.best.m.from === m.from && useCtx.best.m.to === m.to) { cls = 'eval-good'; label = '好棋！与推荐一致'; }
+  else if (gap <= 30) { cls = 'eval-good'; label = '好棋！'; }
+  else if (gap <= 120) { cls = 'eval-ok'; label = '一般'; }
   else { cls = 'eval-bad'; label = '可改进'; }
   let html = '你走了 <b>' + name + '</b>：<span class="' + cls + '">' + label + '</span>';
+  // 落后局面下别只说“可改进”，把差距量级也告诉用户（小差距就别制造焦虑）
+  if (gap > 30) html += '<span class="tag-line">（与最佳着 ' + formatGap(gap) + '）</span>';
   if (cls === 'eval-bad' && useCtx.best) html += '，更佳是「' + moveName(beforeBoard, useCtx.best.m) + '」';
   box.innerHTML = html;
   runtime.teachCtx = null;
@@ -549,14 +559,20 @@ function runAnalysisAdvice() {
   setTimeout(() => {
     if (!analysis.active) return;
     const phase = detectPhase(game.board);
-    const { recs } = buildRecommendations(game.board, mySide, 3, 2, game.moveHistory.length);
+    const { recs, best } = buildRecommendations(game.board, mySide, 3, 2, game.moveHistory.length);
     const threats = opponentThreats(game.board, mySide);
     const diag = positionDiagnostics(game.board, mySide, game.moveHistory.length);
-    let h = '<div class="why">' + strategyPlan(game.board, mySide, phase) + '</div>';
+    const verdict = positionVerdict(game.board, mySide, best ? best.v : undefined);
+    let h = '<div><b>局面判断：</b><span class="' + verdict.cls + '">' + verdict.label + '</span>' +
+      '<div class="why">' + verdict.detail + '</div></div>' +
+      '<div class="why">' + strategyPlan(game.board, mySide, phase) + '</div>';
     if (recs.length) {
       h += '<b>我方（' + sideName(mySide) + '）推荐走法：</b>';
       recs.forEach((r, i) => {
-        h += '<div class="rec-item" data-a="' + i + '"><b>' + (i + 1) + '. ' + moveName(game.board, r.m) + '</b> · ' + r.idea +
+        const gap = r.gap === undefined ? 0 : r.gap;
+        const gapCls = gap <= 0 ? 'eval-good' : (gap < 150 ? 'eval-ok' : 'eval-bad');
+        h += '<div class="rec-item" data-a="' + i + '"><b>' + (i + 1) + '. ' + moveName(game.board, r.m) + '</b>' +
+          '<span class="' + gapCls + '">（' + (r.gapText || formatGap(gap)) + '）</span> · ' + r.idea +
           '<div class="why">理由：' + r.reason + (r.reply ? '<br>预计对方：' + r.reply : '') + '</div>' +
           '<div class="risk">风险：' + r.risk + '</div></div>';
       });

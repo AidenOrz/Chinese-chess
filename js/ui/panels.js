@@ -3,6 +3,7 @@
  * 侧栏面板渲染（教学面板 / 失子 / 走棋记录 / 状态栏 / 弹窗 / Toast）
  * ===================================================================== */
 import { sideOf, typeOf, RED, PIECE_CHAR, sideName, PHASE_NAME, moveName, isInCheck } from '../engine/index.js';
+import { formatGap, positionVerdict } from '../teach/explain.js';
 import { game, analysis, runtime, teachMode } from '../state.js';
 import { snd } from '../audio.js';
 import { $ } from './dom.js';
@@ -116,15 +117,27 @@ export function renderTeachPanel() {
   const detail = teachMode() === 'detail' || $('chk-detail').checked;
   const showRisk = teachMode() === 'detail';
   const c = runtime.teachCtx;
-  const score = c.best ? c.best.v : 0;
-  const scoreTxt = score > 60 ? '你方略优' : score < -60 ? '你方略亏' : '局面大致均衡';
-  let html = '<b>局面判断：</b>' + (PHASE_NAME[c.phase] || '') + ' · ' + scoreTxt +
-    '<div class="why">' + c.plan + '</div>';
-  html += '<b>推荐走法（' + sideName(c.side) + '）：</b>';
+  // 局面判断用「绝对评估」翻译成人话，并单列子力差异——
+  // 落后时用户最需要知道的是“差在哪、还能不能守和”，而不是一个负分。
+  const verdict = c.verdict || positionVerdict(game.board, c.side, c.best ? c.best.v : undefined);
+  let html = '<b>局面判断：</b>' + (PHASE_NAME[c.phase] || '') +
+    ' · <span class="' + verdict.cls + '">' + verdict.label + '</span>' +
+    '<div class="why">' + verdict.detail + '</div>' +
+    '<div class="why">' + c.plan + '</div>' +
+    // 落后时“好棋”的标准和均势不同，否则用户会觉得怎么下都错
+    (c.losingTips && c.losingTips.length
+      ? '<div class="why" style="color:#ffd97a">落后局面怎么下才算好：' +
+        c.losingTips.map(t => '<br>· ' + t).join('') + '</div>'
+      : '');
+  html += '<b>推荐走法（' + sideName(c.side) + '）：</b>' +
+    '<div class="tag-line">评分 = 与当前最佳着的差距，显示“最佳”即并列最优</div>';
   c.recs.forEach((r, i) => {
-    const vTxt = (r.v === undefined || isNaN(r.v)) ? '' : '（' + (r.v >= 0 ? '+' : '') + Math.round(r.v / 10) / 10 + '）';
-    html += '<div class="rec-item" data-i="' + i + '"><b>' + (i + 1) + '. ' + moveName(game.board, r.m) + '</b>' + vTxt +
-      ' · ' + r.idea +
+    // gap 恒 ≥ 0：0 显示“最佳”，否则“差 N 兵”。绝不显示负分。
+    const gap = (r.gap === undefined || isNaN(r.gap)) ? 0 : r.gap;
+    const vTxt = '（' + (r.gapText || formatGap(gap)) + '）';
+    const gapCls = gap <= 0 ? 'eval-good' : (gap < 150 ? 'eval-ok' : 'eval-bad');
+    html += '<div class="rec-item" data-i="' + i + '"><b>' + (i + 1) + '. ' + moveName(game.board, r.m) + '</b>' +
+      '<span class="' + gapCls + '">' + vTxt + '</span> · ' + r.idea +
       (detail ? '<div class="why">思路：' + r.reason +
         (r.reply ? '<br>预计对方：' + r.reply : '') + '</div>' : '') +
       (showRisk ? '<div class="risk">风险：' + r.risk + '</div>' : '') + '</div>';

@@ -24,6 +24,7 @@
 - **模式互斥**:formal / analysis / review / study 四模式共用主棋盘,由 `runtime.boardOwner` 标记当前占用者。进入新模式前退出旧的(各自 `exitXxx()`)并 `resetAiSession()`;`applyFormalMove` 与 `scheduleAi` 都校验 owner,非 `formal` 一律不落子。**新增模式必须同时接入这两处**,否则 AI 回调会写到别人的棋盘上
 - **改 `game.board` 的路径必须紧跟视觉复位**:`renderAllPieces()` + 清 `ui.lastMove/selected/targets`。曾漏在 `startQuiz`(课程跟练→习题时棋盘停在旧局面、点子无反应);`setBoardFromFen` 是现成范本
 - **布局几何**:棋盘边距/列号位置一律走 `layout.js` 的 `padFor(S)/numFont(S)/pieceR(S)`,不要另起固定比例;改完必须跑 `tests/layout.test.js`(它逐档核对 `S=30..58`)`+ 真实浏览器量 `getBoundingClientRect`,`npm test` 全绿不代表渲染正确
+- **分数只有两种口径,别混用**:引擎返回的 `v` 是**绝对评估**(走子方视角的局面分,落后时为负);用户该看的是 `gap = 最佳v - 该着v`(恒 ≥ 0)。面板/走子评价一律用 `formatGap(gap)` 与 `buildRecommendations(…).gaps`,**不要直接显示 `v`**。判断走子好坏也用 gap,不能用 `v <= 阈值`(落后方任何着法的 v 都很小)
 - **提交**:中文 message,阶段/主题前缀(如 `阶段2:FEN …`);一个可验证完整单元一个提交
 - **发布**:SW(v3 起)统一网络优先+缓存回退,在线永远最新,离线兜底可用;发布时仍建议递增 `sw.js` 的 `CACHE` 清理历史缓存(两次事故都出在"缓存优先+版本号纪律"上,详见坑 6/9)
 
@@ -45,9 +46,10 @@
 14. **棋盘列号被棋子完全遮挡**(P2):`pad = round(S*0.72)`,列号固定在 `pad*0.5`;而首行棋子圆盘上沿在 `pad-0.43S`——S=56 时净空隙只有 0.29S,15px 字形有 11.6px 压在棋子底下,而首行 9 列全有子,等于 18 个列号全废。修复:边距改由几何反推 `padFor(S)=0.43S+6+字号+6`,并把列号放到"外框内壁与棋子圆盘之间"那段空隙的中点。教训:**布局常量别按 S 拍脑袋给比例**,写成 `padFor(S)` 后再用测试逐档核对不变式。
 15. **侧栏复盘面板被顶出首屏**(P2):`#card-review` 排在侧栏 6 张卡之后,而棋盘在左列且不随滚动移动,进复盘必须滚动才能看到面板,于是"一边看棋盘一边看复盘"根本做不到。修复:复盘卡移到侧栏首位 + `position: sticky` 吸顶,并在复盘期间收起教学/走棋记录/存档(`.rev-hidden`)。教训:**同一视图里要并看的两块内容,不能靠 DOM 顺序碰运气**。
 16. **移动端 `innerWidth` ≠ 布局视口**(P2,改布局时新发现):`computeLayout` 只读 `window.innerWidth`。CDP 模拟 400px 宽手机时 `innerWidth` 报 438,按它算出的棋盘 474px 比视口宽 74px,页面横向溢出、棋盘被裁。修复:取 `min(innerWidth, documentElement.clientWidth)`,并让 `fitBoardS` 在放不下时继续收格宽而不是死守下限。教训:**纯逻辑单测永远发现不了这类问题**,改渲染必须用真实浏览器量 `getBoundingClientRect` + `scrollWidth`。
-17. **`npm test` 在 Windows 不可用**(P1,同批):`node --test tests/` 把目录当模块名,报 `MODULE_NOT_FOUND`;`README` 却承诺可用。改 `node --test "tests/*.test.js"`(引号防 shell 展开,Node 自身 glob)后 12 文件全绿。教训:文档里写的命令要真的跑一遍。
-18. **测试打桩的假通过**(P1,同批):`dom-stub` 的 `addEventListener` 原本是空函数,`element.dispatchEvent('click')` 也不会触达监听器——"点击被拦截"这类断言写出来永远是绿的,因为 handler 根本没执行。修打桩时要同时让 `addEventListener` 记账、`dispatchEvent` 传**事件对象**(不是字符串),否则回归测试形同虚设。
-19. **study.js 漏导入 `analysis`**(P0,被坑 9 掩盖):SW 修好后课程/题库点击仍无反应——`startStudy` 首行 `if (analysis.active)` 抛 ReferenceError,async 函数静默 reject,无 toast 无控制台报错(除非预先挂 unhandledrejection 监听)。这正是 HANDOFF 里"学习模式 e2e 未实测"想抓的真 bug。教训:异步事件处理器失败是**静默**的,排点击无反应先挂 `unhandledrejection` 收集器;未实测的路径优先补测。同期还发现 explain 步 `courseButtons(false)` 是死胡同(无"下一步"),已改 true。
+17. **落后时"下什么都扣分"**(P1,用户实报):教学面板把搜索的**绝对评估** `v` 当成"这一步好不好"显示。`v` 是走子方视角的局面分,落后时必然全为负——实测对最强 AI 落后 10 分以上(少一车一马一炮)时,32 个合法着法**无一为正**,三个推荐全显示 `(-17.6)`,用户看到的是"怎么下都错";真相是那三步并列最佳(`gap=0`)。修复:新增 `gap = 最佳v - 该着v`(恒 ≥ 0,<50 显示"最佳",否则"差 N 兵"),面板/推演/走子评价全部改用 gap;另加 `positionVerdict`(把绝对分翻译成"你方已近败势"+子力差异)与 `losingPlan`(落后时好棋的标准:忌兑子、制造不确定、目标降级为守和)。教训:**"评分"必须区分「绝对实力」与「这一步的相对质量」**,前者落后时全负是正确行为,错在拿它当后者展示。
+18. **`npm test` 在 Windows 不可用**(P1,同批):`node --test tests/` 把目录当模块名,报 `MODULE_NOT_FOUND`;`README` 却承诺可用。改 `node --test "tests/*.test.js"`(引号防 shell 展开,Node 自身 glob)后 12 文件全绿。教训:文档里写的命令要真的跑一遍。
+19. **测试打桩的假通过**(P1,同批):`dom-stub` 的 `addEventListener` 原本是空函数,`element.dispatchEvent('click')` 也不会触达监听器——"点击被拦截"这类断言写出来永远是绿的,因为 handler 根本没执行。修打桩时要同时让 `addEventListener` 记账、`dispatchEvent` 传**事件对象**(不是字符串),否则回归测试形同虚设。
+20. **study.js 漏导入 `analysis`**(P0,被坑 9 掩盖):SW 修好后课程/题库点击仍无反应——`startStudy` 首行 `if (analysis.active)` 抛 ReferenceError,async 函数静默 reject,无 toast 无控制台报错(除非预先挂 unhandledrejection 监听)。这正是 HANDOFF 里"学习模式 e2e 未实测"想抓的真 bug。教训:异步事件处理器失败是**静默**的,排点击无反应先挂 `unhandledrejection` 收集器;未实测的路径优先补测。同期还发现 explain 步 `courseButtons(false)` 是死胡同(无"下一步"),已改 true。
 
 ## 4. 内容生产线
 

@@ -172,3 +172,18 @@ export function strategyPlan(bd, side, phase) {
   if (lead < -150) return '中局方针：局面落后，宜制造复杂变化、牵制对方主力，寻找反击机会。';
   return '中局方针：局面接近，重点争夺河沿与中路要道，保持子力联系，伺机夺取主动。';
 }
+/**
+ * 落后局面的「怎样才算下得好」——落后时好棋的标准和均势完全不同：
+ * 不是抢分，而是找对手最难下的一手。教学面板据此解释为什么推荐某着。
+ */
+export function losingPlan(bd, side) {
+  const lead = materialLead(bd, side);
+  if (lead >= -150) return null;                 // 不落后就不给这套建议
+  const tips = [];
+  // 子力少的一方最怕被兑子简化：越兑越难守和
+  tips.push('少子方忌兑子：尽量保留有生力量，避免主动交换大子');
+  tips.push('制造不确定：把局面导向对手需要算清才能赢的类型（对攻、乱战），比平稳输棋更有机会');
+  if (lead <= -900) tips.push('目标现实一点：先求守和与不崩盘，能拖住就是好棋');
+  else tips.push('寻找反击：攻击对手的过河子、威胁其帅(将)门，用攻势抵消子力亏损');
+  return tips;
+}
